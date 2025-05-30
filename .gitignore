@@ -1,0 +1,3 @@
+# Ignore sensitive JSON files
+credentials.json
+config.json
