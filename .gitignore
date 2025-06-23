@@ -7,5 +7,4 @@ Include/
 Lib/
 Scripts/
 pyvenv.cfg
-MeshNodes/__pycache__/__init__.cpython-311.pyc
-MeshNodes/__pycache__/MeshNodes.cpython-311.pyc
+__pycache__/
