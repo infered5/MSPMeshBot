@@ -4,7 +4,7 @@
   "description": "Lets your users submit paperwork about their Meshtastic nodes and their placement around your region.",
   "author": ["infered5"],
   "install_msg": "Thanks for installing!",
-  "requirements": [discord.py, Red-DiscordBot, google-auth, google-auth-oauthlib, google-auth-httplib2, google-api-python-client],
+  "requirements": ["discord.py", "Red-DiscordBot", "google-auth", "google-auth-oauthlib", "google-auth-httplib2", "google-api-python-client"],
   "tags": ["utility"],
   "hidden": false,
   "disabled": false
