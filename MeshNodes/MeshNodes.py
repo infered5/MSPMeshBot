@@ -1,8 +1,7 @@
 import discord
 from discord.ui import Button, View
 from redbot.core import commands, app_commands
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+import sqlite3
 import json
 import os
 import logging
@@ -32,6 +31,9 @@ class MeshNodes(commands.Cog):
         self.ensure_config()
         self.config = self.load_config()
         self.service = self.authenticate_google_sheets()
+
+        # This can be changed in the future, just want to be extra careful with who can access the database
+        self.database_admin_ids = {196412468262600707, 173669080388075528}
 
     def ensure_config(self):
         """Ensures the configuration file exists and has valid values."""
@@ -67,72 +69,6 @@ class MeshNodes(commands.Cog):
             logger.error(f"Unexpected error loading configuration file: {e}", exc_info=True)
         return {}
 
-    def authenticate_google_sheets(self):
-        """Authenticate with Google Sheets API using a service account."""
-        credentials_path = self.config.get("CREDENTIALS_PATH")
-        if not credentials_path:
-            logger.error("CREDENTIALS_PATH is missing in the configuration file.")
-            return None
-
-        credentials_path = os.path.join(self.base_dir, credentials_path)  # Ensure correct path
-        logger.debug(f"Checking Google Sheets credentials file at: {credentials_path}")
-
-        if not os.path.exists(credentials_path):
-            logger.error(f"Google Sheets credentials file not found at: {credentials_path}")
-            return None
-
-        try:
-            creds = service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
-            )
-            logger.info("Google Sheets authentication successful.")
-            return build("sheets", "v4", credentials=creds)
-        except FileNotFoundError:
-            logger.error(f"Google Sheets credentials file missing at: {credentials_path}.")
-        except Exception as e:
-            logger.error(f"Google Sheets authentication failed: {e}", exc_info=True)
-        return None
-
-    def get_sheet_data(self):
-        """Fetches data from the Google Sheet."""
-        if not self.service:
-            logger.error("Google Sheets service not initialized.")
-            return []
-
-        sheet_id = self.config.get("GOOGLE_SHEET_ID")
-        if not sheet_id:
-            logger.error("Missing Google Sheet ID in the configuration.")
-            return []
-
-        range_name = "Form Responses 1"  # Adjust if needed
-        try:
-            result = self.service.spreadsheets().values().get(spreadsheetId=sheet_id, range=range_name).execute()
-            return result.get("values", [])
-        except Exception as e:
-            logger.error(f"Failed to retrieve sheet data: {e}", exc_info=True)
-            return []
-
-
-    def find_nodes(self, key, value):
-        """Finds nodes by a key-value pair."""
-        data = self.get_sheet_data()
-        if not data:
-            logger.warning("No data found in the sheet.")
-            return []
-
-        headers = data[0]  # First row as headers
-        result = []
-        for row in data[1:]:  # Loop through the data, skipping the header
-            node = dict(zip(headers, row))
-            if str(node.get(key, "")).lower() == value.lower():
-                result.append(node)
-
-        if result:
-            logger.info(f"Found {len(result)} node(s) matching {key} = {value}.")
-        else:
-            logger.warning(f"No nodes found matching {key} = {value}.")
-        return result
 
 
 
@@ -176,102 +112,135 @@ class MeshNodes(commands.Cog):
     @commands.command(name="nodelist")
     async def nodelist(self, ctx, user: discord.User = None):
         """Retrieve a list of nodes owned by a user."""
-        
-        # Send loading message
+
         loading_message = await ctx.send(self.get_random_loading_message())
-        
+
         if not user:
             # Default to the author if no user is mentioned
             user = ctx.author
-        
+
         user_id = str(user.id)
-        nodes = self.find_nodes("Your Discord User ID", user_id)
-        
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized")
+            return
+
+        nodes = []
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT node_id, short_name, long_name FROM nodes WHERE discord_id = ?",
+                    (user_id,)
+                )
+                rows = cursor.fetchall()
+                for row in rows:
+                    nodes.append({
+                        "Node ID": row[0],
+                        "Node Shortname": row[1],
+                        "Node Longname": row[2]
+                    })
+        except Exception as e:
+            await loading_message.edit(content=f"Database error: {e}")
+            return
+
         if not nodes:
             await loading_message.edit(content=f"No nodes found for {user.display_name}.")
             return
-        
+
         embed = discord.Embed(
             title=f"Nodes owned by {user.display_name}",
             color=discord.Color.green()
         )
-        
+
         for node in nodes:
             embed.add_field(
                 name=node.get("Node Longname", "Unknown Node"),
                 value=f"**Shortname:** {node.get('Node Shortname', 'N/A')}\n**Node ID:** {node.get('Node ID', 'N/A')}",
                 inline=False
             )
-        
+
         await loading_message.edit(content=None, embed=embed)
 
 
     @commands.command(name="whohas", aliases=["node", "nodeinfo"])
     async def node(self, ctx, *identifier: str):
-        """Find the owner of a node by Longname or Node ID."""
+        """Find the owner of a node by Longname, Shortname, or Node ID (supports partial Node ID from the end)."""
         if not identifier:
-            await ctx.send("Please provide a Node ID or Longname.")
+            await ctx.send("Please provide a Node ID, Longname, or Shortname.")
             return
-        
+
         identifier = " ".join(identifier).strip()
         logger.debug(f"Processing !node command for identifier: '{identifier}'")
-        
-        # Send loading message
+
         loading_message = await ctx.send(self.get_random_loading_message())
 
-        # Fetch node data
-        nodes = self.find_nodes("Node ID", identifier) or self.find_nodes("Node Longname", identifier) or self.find_nodes("Node Shortname", identifier)
-        
-        if not nodes:
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
+            return
+
+        matches = []
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                # Node ID: match from the end (last N chars)
+                if len(identifier) <= 8:
+                    cursor.execute(
+                        "SELECT node_id, short_name, long_name, discord_id FROM nodes WHERE substr(node_id, -?) = ?",
+                        (len(identifier), identifier)
+                    )
+                    matches += cursor.fetchall()
+                # Shortname and Longname: case-insensitive match
+                cursor.execute(
+                    "SELECT node_id, short_name, long_name, discord_id FROM nodes WHERE lower(short_name) = ? OR lower(long_name) = ?",
+                    (identifier.lower(), identifier.lower())
+                )
+                matches += [row for row in cursor.fetchall() if row not in matches]
+        except Exception as e:
+            await loading_message.edit(content=f"Database error: {e}")
+            return
+
+        if not matches:
             await loading_message.edit(
                 content=(
                     f"Node not found: `{identifier}`\n"
                     "If this node is yours, please run `!paperwork` so we can have it in the database!"
                 )
             )
-
             return
-        
-        node = nodes[0]
-        owner_id = node.get("Your Discord User ID")
-        embed = discord.Embed(title=f"Node Info: {node.get('Node Longname')}", color=discord.Color.green())
-        embed.add_field(name="Shortname", value=node.get("Node Shortname"), inline=True)
-        embed.add_field(name="Node ID", value=node.get("Node ID"), inline=True)
-        embed.add_field(name="Owner", value=f"<@{owner_id}>", inline=False)
-        #embed.add_field(name="Owner", value=f"<@!{owner_id}>", inline=False) #!{owner_id} renders as nickname, without ! is username
 
-        # Create a button that will trigger the nodefull command
+        embed = discord.Embed(
+            title=f"Node Info Results ({len(matches)})",
+            color=discord.Color.green()
+        )
+
         view = View()
-        button = Button(label="View Full Node Info", custom_id=f"nodefull_{identifier}")
-        view.add_item(button)
+        for idx, (node_id, short_name, long_name, owner_id) in enumerate(matches):
+            embed.add_field(
+                name=long_name,
+                value=f"**Shortname:** {short_name}\n**Node ID:** {node_id}\n**Owner:** <@{owner_id}>",
+                inline=False
+            )
+            # Add a button for each node
+            button = Button(
+                label=f"View Full Node Info ({long_name})",
+                custom_id=f"nodefull_{node_id}_{idx}"
+            )
+            async def make_callback(node_id=node_id):
+                async def button_callback(interaction: discord.Interaction):
+                    await interaction.response.defer()
+                    await self.run_nodefull_on_interaction(interaction, node_id)
+                return button_callback
+            button.callback = await make_callback()
+            view.add_item(button)
 
-        # Send the embed and attach the button
         await loading_message.edit(content=None, embed=embed, view=view)
 
-        # Handle the button click
-        async def button_callback(interaction: discord.Interaction):
-            # Acknowledge the button interaction
-            await interaction.response.defer()  # This acknowledges the button click
-            
-            # Re-run the !nodefull command by invoking it programmatically
-            await self.run_nodefull_on_interaction(interaction, identifier)
-        
-        button.callback = button_callback
-
-    #nodefull stuff here. Not a @command
-    async def run_nodefull_on_interaction(self, interaction: discord.Interaction, identifier: str):
-        """Runs the nodefull command on behalf of the user who clicked the button."""
-        # Send loading message for the nodefull command
-        loading_message = await interaction.channel.send(self.get_random_loading_message())
-
-        # Fetch node data
-        nodes = self.find_nodes("Node ID", identifier) or self.find_nodes("Node Longname", identifier) or self.find_nodes("Node Shortname", identifier)
-        
-        if not nodes:
-            await loading_message.edit(content=f"Node not found: `{identifier}`")
-            return
-        
-        node = nodes[0]
+    def _get_node_details_embed(self, node_row):
+        """
+        Helper to build a Discord embed for full node info from a database row.
+        """
         excluded_keys = {
             "your discord username",
             "timestamp",
@@ -280,74 +249,110 @@ class MeshNodes(commands.Cog):
             "column 8",
             "adjustednodeid"
         }
-        embed = discord.Embed(title=f"Full Node Info: {node.get('Node Longname')}", color=discord.Color.blue())
-        
-        for key, value in node.items():
-            # Clean the key for case-insensitivity and extra spaces
-            cleaned_key = key.strip().lower()
+        # node_row: (node_id, discord_id, timestamp, short_name, long_name, additional_node_data_json)
+        node_id, discord_id, timestamp, short_name, long_name, additional_node_data_json = node_row
 
-            if cleaned_key not in excluded_keys:
-                embed.add_field(name=key, value=value, inline=True)
-        
-        owner_id = node.get("Your Discord User ID")
-        if owner_id:
-            embed.add_field(name="Owner", value=f"<@!{owner_id}>", inline=True)
-        
-        await loading_message.edit(content=None, embed=embed)  # Edit loading message with the final embed
+        embed = discord.Embed(title=f"Full Node Info: {long_name}", color=discord.Color.blue())
+        embed.add_field(name="Node ID", value=node_id, inline=True)
+        embed.add_field(name="Shortname", value=short_name, inline=True)
+        embed.add_field(name="Longname", value=long_name, inline=True)
+        embed.add_field(name="Owner", value=f"<@!{discord_id}>", inline=True)
 
+        # Parse additional_node_data_json for extra fields
+        try:
+            extra = json.loads(additional_node_data_json)
+            maidenhead_key = "If a permanent install, where is this node placed?"
+            grid_url_template = "https://www.levinecentral.com/ham/grid_square.php?&Grid={}&Zoom=13&sm=y"
+            for key, value in extra.items():
+                cleaned_key = key.strip().lower()
+                if cleaned_key not in excluded_keys:
+                    if cleaned_key == maidenhead_key.lower() and self.is_valid_maidenhead(str(value)):
+                        grid_url = grid_url_template.format(value)
+                        value = f"[{value}]({grid_url})"
+                    embed.add_field(name=key, value=str(value), inline=True)
+        except Exception as e:
+            embed.add_field(name="Error", value=f"Failed to parse extra data: {e}", inline=False)
+        return embed
 
+    #nodefull stuff here. Not a @command
+    # TODO Update this to use the new sqlite database
+    async def run_nodefull_on_interaction(self, interaction: discord.Interaction, identifier: str):
+        """Runs the nodefull command on behalf of the user who clicked the button, using the new database."""
+        loading_message = await interaction.channel.send(self.get_random_loading_message())
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
+            return
+
+        node_row = None
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                # Try by node_id (exact or partial from end)
+                cursor.execute(
+                    "SELECT * FROM nodes WHERE node_id = ? OR substr(node_id, -?) = ?",
+                    (identifier, len(identifier), identifier)
+                )
+                node_row = cursor.fetchone()
+                if not node_row:
+                    # Try by long_name or short_name (case-insensitive)
+                    cursor.execute(
+                        "SELECT * FROM nodes WHERE lower(long_name) = ? OR lower(short_name) = ?",
+                        (identifier.lower(), identifier.lower())
+                    )
+                    node_row = cursor.fetchone()
+        except Exception as e:
+            await loading_message.edit(content=f"Database error: {e}")
+            return
+
+        if not node_row:
+            await loading_message.edit(content=f"Node not found: `{identifier}`")
+            return
+
+        embed = self._get_node_details_embed(node_row)
+        await loading_message.edit(content=None, embed=embed)
 
     @commands.command(name="nodefull")
     async def nodefull(self, ctx, *identifier: str):
-        """Displays full details of a node by Longname or Node ID."""
+        """Displays full details of a node by Longname or Node ID using the new database."""
         if not identifier:
             await ctx.send("Please provide a Node ID or Longname.")
             return
-        
+
         identifier = " ".join(identifier).strip()
-
-        # Send loading message
         loading_message = await ctx.send(self.get_random_loading_message())
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
+            return
 
-        # Fetch node data
-        nodes = self.find_nodes("Node ID", identifier) or self.find_nodes("Node Longname", identifier) or self.find_nodes("Node Shortname", identifier)
-        
-        if not nodes:
+        node_row = None
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                # Try by node_id (exact or partial from end)
+                cursor.execute(
+                    "SELECT * FROM nodes WHERE node_id = ? OR substr(node_id, -?) = ?",
+                    (identifier, len(identifier), identifier)
+                )
+                node_row = cursor.fetchone()
+                if not node_row:
+                    # Try by long_name or short_name (case-insensitive)
+                    cursor.execute(
+                        "SELECT * FROM nodes WHERE lower(long_name) = ? OR lower(short_name) = ?",
+                        (identifier.lower(), identifier.lower())
+                    )
+                    node_row = cursor.fetchone()
+        except Exception as e:
+            await loading_message.edit(content=f"Database error: {e}")
+            return
+
+        if not node_row:
             await loading_message.edit(content=f"Node not found: `{identifier}`")
             return
-        
-        node = nodes[0]
-        excluded_keys = {
-            "your discord username",
-            "timestamp",
-            "your discord user id",
-            "should your previous form entry be deleted, because you are submitting a new one to update old information?",
-            "column 8",
-            "adjustednodeid"
-        }
 
-        embed = discord.Embed(title=f"Full Node Info: {node.get('Node Longname')}", color=discord.Color.blue())
-
-        maidenhead_key = "If a permanent install, where is this node placed?"
-        grid_url_template = "https://www.levinecentral.com/ham/grid_square.php?&Grid={}&Zoom=13&sm=y"
-
-        for key, value in node.items():
-            # Clean the key for case-insensitivity and extra spaces
-            cleaned_key = key.strip().lower()
-
-            if cleaned_key not in excluded_keys:
-                if cleaned_key == maidenhead_key.lower() and self.is_valid_maidenhead(value):
-                    # Format the Maidenhead grid link
-                    grid_url = grid_url_template.format(value)
-                    value = f"[{value}]({grid_url})"  # Create a clickable link
-                
-                embed.add_field(name=key, value=value, inline=True)
-        
-        owner_id = node.get("Your Discord User ID")
-        if owner_id:
-            embed.add_field(name="Owner", value=f"<@!{owner_id}>", inline=True)
-        
-        await loading_message.edit(content=None, embed=embed)  # Edit loading message with the final embed
+        embed = self._get_node_details_embed(node_row)
+        await loading_message.edit(content=None, embed=embed)
         
 
 
@@ -370,7 +375,7 @@ class MeshNodes(commands.Cog):
             else:
                 await loading_message.edit(content="Error: Invalid argument. Please mention a valid user or provide no argument to get your own ID.")
 
-    
+    # TODO update this to use discord models 
     @commands.command(name="paperwork")
     async def paperwork(self, ctx, user: discord.User = None):
         """Send the paperwork link to a user's DMs with their Discord ID prefilled."""
@@ -407,50 +412,197 @@ class MeshNodes(commands.Cog):
             await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
 
 
-
+    # TODO update this to use sqlite
     @commands.command(name="nodetotal")
     async def nodetotal(self, ctx):
-        """Counts the total number of node entries and breaks them down by General Location."""
-        
-        # Send loading message
+        """Counts the total number of unique node IDs in the database."""
         loading_message = await ctx.send("Calculating total node entries...")
 
-        # Fetch all node data
-        data = self.get_sheet_data()
-        if not data or len(data) < 2:
-            await loading_message.edit(content="No nodes found in the database.")
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
             return
-        
-        headers = data[0]  # First row as headers
-        rows = data[1:]    # Remaining rows are actual data
-        total_entries = len(rows)
 
-        # Find the index of "General Location" column
         try:
-            location_index = headers.index("General Location")
-        except ValueError:
-            await loading_message.edit(content="Error: 'General Location' column not found in the sheet.")
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(DISTINCT node_id) FROM nodes")
+                result = cursor.fetchone()
+                total_entries = result[0] if result else 0
+        except Exception as e:
+            await loading_message.edit(content=f"Database error: {e}")
             return
 
-        # Count entries per General Location
-        location_counts = {}
-        for row in rows:
-            location = row[location_index] if location_index < len(row) else "Unknown"
-            location_counts[location] = location_counts.get(location, 0) + 1
-
-        # Construct the response message
         embed = discord.Embed(title="Node Entry Totals", color=discord.Color.green())
-        embed.add_field(name="Total Entries", value=str(total_entries), inline=False)
-
-        for location, count in location_counts.items():
-            embed.add_field(name=location, value=str(count), inline=True)
-        
+        embed.add_field(name="Total Unique Node IDs", value=str(total_entries), inline=False)
         await loading_message.edit(content=None, embed=embed)
 
 
+    def get_db_path(self):
+        """Returns the path to the SQLite database file."""
+        return os.path.join(self.base_dir, "meshnodes.db")
+
+    def connect_db(self):
+        """Connects to the SQLite database."""
+        return sqlite3.connect(self.get_db_path())
+
+
+    
+    async def double_confirm(ctx, step1_text, step2_text, cancel_text):
+        view1 = ConfirmView(ctx.author.id, "Are you sure?")
+        msg = await ctx.send(step1_text, view=view1)
+        await view1.wait()
+        if not view1.confirmed:
+            await msg.edit(content=cancel_text, view=None)
+            return False
+
+        view2 = ConfirmView(ctx.author.id, "Are you REALLY sure?")
+        await msg.edit(content=step2_text, view=view2)
+        await view2.wait()
+        if not view2.confirmed:
+            await msg.edit(content=cancel_text, view=None)
+            return False
+
+        return msg
+    
+    @commands.command(name="insertnodes")
+    @commands.has_permissions(administrator=True)
+    async def insertnodes(self, ctx):
+        if ctx.author.id not in self.database_admin_ids:
+            await ctx.send("You do not have permission to perform this action.")
+            return
+
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await ctx.send("Database not initialized.")
+            return
+
+        fake_nodes = [
+            {
+                "node_id": f"{random.randint(0, 0xFFFFFFFF):08X}",
+                "discord_id": str(ctx.author.id),
+                "short_name": "ABCD",
+                "long_name": "Test Node Alpha",
+                "additional_node_data_json": "{}"
+            },
+            {
+                "node_id": f"{random.randint(0, 0xFFFFFFFF):08X}",
+                "discord_id": str(ctx.author.id),
+                "short_name": "EFG",
+                "long_name": "Test Node Beta",
+                "additional_node_data_json": "{}"
+            },
+            {
+                "node_id": f"{random.randint(0, 0xFFFFFFFF):08X}",
+                "discord_id": str(ctx.author.id),
+                "short_name": "HIJ",
+                "long_name": "Test Node Gamma",
+                "additional_node_data_json": "{}"
+            }
+        ]
+
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                for node in fake_nodes:
+                    cursor.execute(
+                        "INSERT OR IGNORE INTO nodes (node_id, discord_id, short_name, long_name, additional_node_data_json) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            node["node_id"],
+                            node["discord_id"],
+                            node["short_name"],
+                            node["long_name"],
+                            node["additional_node_data_json"]
+                        )
+                    )
+                conn.commit()
+            await ctx.send("Inserted 3 fake nodes.")
+        except Exception as e:
+            await ctx.send(f"Failed to insert fake nodes: {e}")
+
+    @commands.command(name="createdb")
+    @commands.has_permissions(administrator=True)
+    async def createdb(self, ctx):
+        if ctx.author.id not in self.database_admin_ids:
+            await ctx.send("You do not have permission to perform this action.")
+            return
+
+        msg = await self.double_confirm(ctx,
+            "This will create the database. Please confirm.",
+            "Final confirmation required.",
+            "Database creation cancelled."
+        )
+        if not msg:
+            return
+
+        db_path = self.get_db_path()
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS nodes (
+                        node_id TEXT PRIMARY KEY,
+                        discord_id TEXT NOT NULL,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        short_name TEXT NOT NULL,
+                        long_name TEXT NOT NULL,
+                        additional_node_data_json TEXT NOT NULL
+                    )
+                """)
+                conn.commit()
+            await msg.edit(content=f"Database created at `{db_path}`.", view=None)
+        except Exception as e:
+            await msg.edit(content=f"Failed to create database: {e}", view=None)
+
+    @commands.command(name="dropdb")
+    @commands.has_permissions(administrator=True)
+    async def dropdb(self, ctx):
+        if ctx.author.id not in self.database_admin_ids:
+            await ctx.send("You do not have permission to perform this action.")
+            return
+
+        msg = await self.double_confirm(ctx,
+            "This will drop the database. Please confirm.",
+            "Final confirmation required.",
+            "Database drop cancelled."
+        )
+        if not msg:
+            return
+
+        db_path = self.get_db_path()
+        try:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+                await msg.edit(content=f"Database at `{db_path}` has been dropped.", view=None)
+            else:
+                await msg.edit(content="Database file does not exist.", view=None)
+        except Exception as e:
+            await msg.edit(content=f"Failed to drop database: {e}", view=None)
+
+
+
+class ConfirmView(View):
+    def __init__(self, author_id, label):
+        super().__init__(timeout=60)
+        self.author_id = author_id
+        self.confirmed = False
+        self.add_item(self.ConfirmButton(label, self))
+
+    class ConfirmButton(Button):
+        def __init__(self, label, parent):
+            super().__init__(label=label, style=discord.ButtonStyle.danger)
+            self.parent = parent
+
+        async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != self.parent.author_id:
+                await interaction.response.send_message("You can't confirm this action.", ephemeral=True)
+                return
+            self.parent.confirmed = True
+            await interaction.response.defer()
+            self.parent.stop()
+
 
 # Add this cog to the bot
-
-
 async def setup(bot):
     await bot.add_cog(MeshNodes(bot))
+
