@@ -1,5 +1,5 @@
 import discord
-from discord.ui import Button, View
+from discord.ui import Button, View, Modal, TextInput
 from redbot.core import commands, app_commands
 import sqlite3
 import json
@@ -30,7 +30,6 @@ class MeshNodes(commands.Cog):
         self.config_path = os.path.join(self.base_dir, self.CONFIG_FILE)
         self.ensure_config()
         self.config = self.load_config()
-        self.service = self.authenticate_google_sheets()
 
         # This can be changed in the future, just want to be extra careful with who can access the database
         self.database_admin_ids = {196412468262600707, 173669080388075528}
@@ -378,41 +377,72 @@ class MeshNodes(commands.Cog):
     # TODO update this to use discord models 
     @commands.command(name="paperwork")
     async def paperwork(self, ctx, user: discord.User = None):
-        """Send the paperwork link to a user's DMs with their Discord ID prefilled."""
+        """Send a Discord Modal to a user's DMs to fill out node info (node_id, short_name, long_name)."""
         loading_message = await ctx.send(self.get_random_loading_message())
 
         if not user:
             user = ctx.author
 
-        encoded_username = user.name.replace(" ", "+")
-        discord_user_id = user.id
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
+            return
 
-        form_url = (
-            "https://docs.google.com/forms/d/e/1FAIpQLSeQdIK8RXZZeXpXt1xYNik3xLlr2JwegyrL83X4RjXc_1EG1Q/viewform"
-            f"?usp=pp_url&entry.2013736315={encoded_username}&entry.1056677804={discord_user_id}"
-        )
+        # Modal definition
+        class NodePaperworkModal(Modal, title="Node Paperwork Submission"):
+            node_id = TextInput(label="Node ID", placeholder="Enter Node ID (e.g. 1A2B3C4D)", required=True, min_length=8, max_length=8)
+            short_name = TextInput(label="Short Name", placeholder="Short name (e.g. MSP)", required=True, min_length=1, max_length=4)
+            long_name = TextInput(label="Long Name", placeholder="Long descriptive name", required=True, min_length=1, max_length=64)
 
-        embed = discord.Embed(
-            title="Paperwork Information",
-            description="This URL is unique to you! It prefills some information.\n"
-                        "If you want to do paperwork, please run `!paperwork` yourself.",
-            color=discord.Color.blue()
-        )
-        embed.add_field(
-            name="Paperwork Form",
-            value=f"[Click here to fill out the paperwork]({form_url})",
-            inline=False
-        )
-        embed.set_footer(text="Thank you for doing your part!")
+            async def on_submit(self, interaction: discord.Interaction):
+                try:
+                    with self_view.cog.connect_db() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO nodes (node_id, discord_id, short_name, long_name, additional_node_data_json) VALUES (?, ?, ?, ?, ?)",
+                            (
+                                self.node_id.value.strip(),
+                                str(user.id),
+                                self.short_name.value.strip(),
+                                self.long_name.value.strip(),
+                                "{}"
+                            )
+                        )
+                        conn.commit()
+                    await interaction.response.send_message("✅ Node paperwork submitted and saved!", ephemeral=True)
+                except Exception as e:
+                    await interaction.response.send_message(f"❌ Failed to save node: {e}", ephemeral=True)
+
+        # Hack to pass self into the modal for DB access
+        self_view = type("SelfView", (), {})()
+        self_view.cog = self
+
+        # View with a button to trigger the modal
+        class PaperworkButtonView(View):
+            def __init__(self, timeout=180):
+                super().__init__(timeout=timeout)
+                self.add_item(self.PaperworkButton())
+
+            class PaperworkButton(Button):
+                def __init__(self):
+                    super().__init__(label="Fill Out Node Paperwork", style=discord.ButtonStyle.primary)
+
+                async def callback(self, interaction: discord.Interaction):
+                    modal = NodePaperworkModal()
+                    await interaction.response.send_modal(modal)
 
         try:
-            await user.send(embed=embed)
-            await loading_message.edit(content="📬 Link has been sent, check your DMs! 💌")
+            dm = await user.create_dm()
+            await dm.send(
+                "Please click the button below to fill out the node paperwork form:",
+                view=PaperworkButtonView()
+            )
+            await loading_message.edit(content="📬 Button sent! Check your DMs and click the button to fill out the form. 💌")
         except discord.Forbidden:
             await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
+        except Exception as e:
+            await loading_message.edit(content=f"❌ Failed to send DM: {e}")
 
-
-    # TODO update this to use sqlite
     @commands.command(name="nodetotal")
     async def nodetotal(self, ctx):
         """Counts the total number of unique node IDs in the database."""
@@ -448,7 +478,7 @@ class MeshNodes(commands.Cog):
 
 
     
-    async def double_confirm(ctx, step1_text, step2_text, cancel_text):
+    async def double_confirm(self, ctx, step1_text, step2_text, cancel_text):
         view1 = ConfirmView(ctx.author.id, "Are you sure?")
         msg = await ctx.send(step1_text, view=view1)
         await view1.wait()
