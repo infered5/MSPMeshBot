@@ -1,6 +1,6 @@
 import discord
 from discord.ui import Button, View, Modal, TextInput
-from redbot.core import commands, app_commands
+from redbot.core import commands
 import sqlite3
 import json
 import os
@@ -273,8 +273,6 @@ class MeshNodes(commands.Cog):
             embed.add_field(name="Error", value=f"Failed to parse extra data: {e}", inline=False)
         return embed
 
-    #nodefull stuff here. Not a @command
-    # TODO Update this to use the new sqlite database
     async def run_nodefull_on_interaction(self, interaction: discord.Interaction, identifier: str):
         """Runs the nodefull command on behalf of the user who clicked the button, using the new database."""
         loading_message = await interaction.channel.send(self.get_random_loading_message())
@@ -354,27 +352,6 @@ class MeshNodes(commands.Cog):
         await loading_message.edit(content=None, embed=embed)
         
 
-
-    @commands.command(name="id")
-    async def user_id(self, ctx, user: discord.User = None):
-        """Return your Discord User ID or the ID of the mentioned user."""
-        # Send loading message
-        loading_message = await ctx.send(self.get_random_loading_message())
-
-        if not user:
-            # No argument, return your own ID
-            user = ctx.author
-            #await loading_message.edit(content=f"Your Discord User ID is: `{user.id}`")
-            await loading_message.edit(content=f"`{user.id}`")
-        else:
-            # Argument provided, check if it's a valid user mention
-            if isinstance(user, discord.User):
-                #await loading_message.edit(content=f"{user.display_name}'s Discord User ID is: `{user.id}`")
-                await loading_message.edit(content=f"`{user.id}`")
-            else:
-                await loading_message.edit(content="Error: Invalid argument. Please mention a valid user or provide no argument to get your own ID.")
-
-    # TODO update this to use discord models 
     @commands.command(name="paperwork")
     async def paperwork(self, ctx, user: discord.User = None):
         """Send a Discord Modal to a user's DMs to fill out node info (node_id, short_name, long_name)."""
@@ -395,13 +372,26 @@ class MeshNodes(commands.Cog):
             long_name = TextInput(label="Long Name", placeholder="Long descriptive name", required=True, min_length=1, max_length=64)
 
             async def on_submit(self, interaction: discord.Interaction):
+                node_id_val = self.node_id.value.strip().upper()
+                # Check if node already exists
                 try:
                     with self_view.cog.connect_db() as conn:
                         cursor = conn.cursor()
                         cursor.execute(
-                            "INSERT OR REPLACE INTO nodes (node_id, discord_id, short_name, long_name, additional_node_data_json) VALUES (?, ?, ?, ?, ?)",
+                            "SELECT 1 FROM nodes WHERE node_id = ?",
+                            (node_id_val,)
+                        )
+                        exists = cursor.fetchone()
+                        if exists:
+                            await interaction.response.send_message(
+                                f"❌ Node with ID `{node_id_val}` already exists in the database. Please use a different Node ID or use `!editnode` to update.",
+                                ephemeral=True
+                            )
+                            return
+                        cursor.execute(
+                            "INSERT INTO nodes (node_id, discord_id, short_name, long_name, additional_node_data_json) VALUES (?, ?, ?, ?, ?)",
                             (
-                                self.node_id.value.strip(),
+                                node_id_val,
                                 str(user.id),
                                 self.short_name.value.strip(),
                                 self.long_name.value.strip(),
@@ -468,6 +458,163 @@ class MeshNodes(commands.Cog):
         await loading_message.edit(content=None, embed=embed)
 
 
+    @commands.command(name="editnode")
+    async def editnode(self, ctx, node_id: str):
+        """
+        Edit the short and/or long name of a node you own by Node ID (must be exactly 8 characters).
+        """
+        loading_message = await ctx.send(self.get_random_loading_message())
+
+        node_id = node_id.strip().upper()
+        if len(node_id) != 8:
+            await loading_message.edit(content="Node ID must be exactly 8 characters.")
+            return
+
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
+            return
+
+        # Check ownership
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT short_name, long_name, discord_id FROM nodes WHERE node_id = ?",
+                    (node_id,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    await loading_message.edit(content=f"No node found with ID `{node_id}`.")
+                    return
+                short_name, long_name, owner_id = row
+                if str(ctx.author.id) != str(owner_id):
+                    await loading_message.edit(content="You do not own this node.")
+                    return
+        except Exception as e:
+            await loading_message.edit(content=f"Database error: {e}")
+            return
+
+        # Modal definition
+        class EditNodeModal(Modal):
+            def __init__(self, short_name_val, long_name_val):
+                super().__init__(title=f"Edit Node {node_id}")
+                self.short_name = TextInput(
+                    label="Short Name (leave blank to keep unchanged)",
+                    placeholder=f"Current: {short_name_val}",
+                    required=False,
+                    min_length=0,
+                    max_length=4
+                )
+                self.long_name = TextInput(
+                    label="Long Name (leave blank to keep unchanged)",
+                    placeholder=f"Current: {long_name_val}",
+                    required=False,
+                    min_length=0,
+                    max_length=64
+                )
+                self.add_item(self.short_name)
+                self.add_item(self.long_name)
+
+            async def on_submit(self, interaction: discord.Interaction):
+                updates = []
+                params = []
+                if self.short_name.value.strip():
+                    updates.append("short_name = ?")
+                    params.append(self.short_name.value.strip())
+                if self.long_name.value.strip():
+                    updates.append("long_name = ?")
+                    params.append(self.long_name.value.strip())
+                if not updates:
+                    await interaction.response.send_message("No changes provided. Node not updated.", ephemeral=True)
+                    return
+                params.append(node_id)
+                try:
+                    with self_view.cog.connect_db() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute(
+                            f"UPDATE nodes SET {', '.join(updates)} WHERE node_id = ?",
+                            params
+                        )
+                        conn.commit()
+                    await interaction.response.send_message("✅ Node updated successfully!", ephemeral=True)
+                except Exception as e:
+                    await interaction.response.send_message(f"❌ Failed to update node: {e}", ephemeral=True)
+
+        # Hack to pass self into the modal for DB access
+        self_view = type("SelfView", (), {})()
+        self_view.cog = self
+
+        # View with a button to trigger the modal
+        class EditNodeButtonView(View):
+            def __init__(self, short_name_val, long_name_val, timeout=180):
+                super().__init__(timeout=timeout)
+                self.add_item(self.EditNodeButton(short_name_val, long_name_val))
+
+            class EditNodeButton(Button):
+                def __init__(self, short_name_val, long_name_val):
+                    super().__init__(label="Edit Node Info", style=discord.ButtonStyle.primary)
+                    self.short_name_val = short_name_val
+                    self.long_name_val = long_name_val
+
+                async def callback(self, interaction: discord.Interaction):
+                    modal = EditNodeModal(self.short_name_val, self.long_name_val)
+                    await interaction.response.send_modal(modal)
+
+        try:
+            dm = await ctx.author.create_dm()
+            await dm.send(
+                f"Click the button below to edit your node `{node_id}`:",
+                view=EditNodeButtonView(short_name, long_name)
+            )
+            await loading_message.edit(content="📬 Button sent! Check your DMs and click the button to edit your node. 💌")
+        except discord.Forbidden:
+            await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
+        except Exception as e:
+            await loading_message.edit(content=f"❌ Failed to send DM: {e}")
+
+    @commands.command(name="transfer")
+    async def transfer(self, ctx, node_id: str, new_owner: discord.User):
+        """
+        Transfer ownership of a node you own to another user.
+        Usage: !transfer <node_id> @username
+        """
+        loading_message = await ctx.send(self.get_random_loading_message())
+
+        node_id = node_id.strip().upper()
+        if len(node_id) != 8:
+            await loading_message.edit(content="Node ID must be exactly 8 characters.")
+            return
+
+        db_path = self.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
+            return
+
+        try:
+            with self.connect_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT discord_id FROM nodes WHERE node_id = ?",
+                    (node_id,)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    await loading_message.edit(content=f"No node found with ID `{node_id}`.")
+                    return
+                owner_id = row[0]
+                if str(ctx.author.id) != str(owner_id):
+                    await loading_message.edit(content="You do not own this node.")
+                    return
+                cursor.execute(
+                    "UPDATE nodes SET discord_id = ? WHERE node_id = ?",
+                    (str(new_owner.id), node_id)
+                )
+                conn.commit()
+            await loading_message.edit(content=f"✅ Node `{node_id}` ownership transferred to {new_owner.mention}.")
+        except Exception as e:
+            await loading_message.edit(content=f"❌ Failed to transfer node: {e}")
+
     def get_db_path(self):
         """Returns the path to the SQLite database file."""
         return os.path.join(self.base_dir, "meshnodes.db")
@@ -495,60 +642,6 @@ class MeshNodes(commands.Cog):
 
         return msg
     
-    @commands.command(name="insertnodes")
-    @commands.has_permissions(administrator=True)
-    async def insertnodes(self, ctx):
-        if ctx.author.id not in self.database_admin_ids:
-            await ctx.send("You do not have permission to perform this action.")
-            return
-
-        db_path = self.get_db_path()
-        if not os.path.exists(db_path):
-            await ctx.send("Database not initialized.")
-            return
-
-        fake_nodes = [
-            {
-                "node_id": f"{random.randint(0, 0xFFFFFFFF):08X}",
-                "discord_id": str(ctx.author.id),
-                "short_name": "ABCD",
-                "long_name": "Test Node Alpha",
-                "additional_node_data_json": "{}"
-            },
-            {
-                "node_id": f"{random.randint(0, 0xFFFFFFFF):08X}",
-                "discord_id": str(ctx.author.id),
-                "short_name": "EFG",
-                "long_name": "Test Node Beta",
-                "additional_node_data_json": "{}"
-            },
-            {
-                "node_id": f"{random.randint(0, 0xFFFFFFFF):08X}",
-                "discord_id": str(ctx.author.id),
-                "short_name": "HIJ",
-                "long_name": "Test Node Gamma",
-                "additional_node_data_json": "{}"
-            }
-        ]
-
-        try:
-            with self.connect_db() as conn:
-                cursor = conn.cursor()
-                for node in fake_nodes:
-                    cursor.execute(
-                        "INSERT OR IGNORE INTO nodes (node_id, discord_id, short_name, long_name, additional_node_data_json) VALUES (?, ?, ?, ?, ?)",
-                        (
-                            node["node_id"],
-                            node["discord_id"],
-                            node["short_name"],
-                            node["long_name"],
-                            node["additional_node_data_json"]
-                        )
-                    )
-                conn.commit()
-            await ctx.send("Inserted 3 fake nodes.")
-        except Exception as e:
-            await ctx.send(f"Failed to insert fake nodes: {e}")
 
     @commands.command(name="createdb")
     @commands.has_permissions(administrator=True)
