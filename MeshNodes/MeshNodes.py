@@ -5,9 +5,10 @@ import os
 import logging
 import random
 
-from .commands.NodeEditCommands import edit_node, transfer_node, register_node, edit_additional_node_info
+from .commands.NodeEditCommands import edit_node, transfer_node, register_node, edit_additional_node_info, clear_additional_node_info
 from .commands.InfoCommands import list_my_nodes, total_nodes, full_node_info, node_info
 from .commands.DatabaseCommands import drop_database, create_database
+
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -91,6 +92,7 @@ class MeshNodes(commands.Cog):
     @commands.command(name="nodefull")
     async def nodefull(self, ctx, *identifier: str):
         await full_node_info(self, ctx, *identifier)
+    
     #############################
     # Node Information Commands #
     #############################
@@ -110,6 +112,10 @@ class MeshNodes(commands.Cog):
     @commands.command(name="editnodeinfo")
     async def editnode(self, ctx, node_id: str):
         await edit_additional_node_info(self, ctx, node_id)
+    
+    @commands.command(name="clearinfo")
+    async def clearinfo(self, ctx, node_id: str):
+        await clear_additional_node_info(self, ctx, node_id)
 
     @commands.command(name="transfer")
     async def transfer(self, ctx, node_id: str, new_owner: discord.User):

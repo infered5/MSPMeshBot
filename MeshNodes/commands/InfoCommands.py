@@ -2,7 +2,7 @@ import discord
 import os
 import re
 import json
-from discord.ui import View, Button
+from discord.ui import View, Button, Select
 from MeshNodes.shared.AdditionalNodeInfo import additional_info_questions
 
 async def total_nodes(self, ctx):

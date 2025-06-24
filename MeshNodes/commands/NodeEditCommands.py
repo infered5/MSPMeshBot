@@ -1,7 +1,10 @@
 import os
 import discord
-from discord.ui import Button, View, Modal, TextInput
-from MeshNodes.shared.AdditionalNodeInfo import parse_additional_info_base64
+import json
+
+from discord.ui import Button, View, Modal, TextInput, Select
+from MeshNodes.shared.AdditionalNodeInfo import AdditionalInfoQuestion, StringQuestion, BooleanQuestion, NumberQuestion, ChoiceQuestion, additional_info_questions
+
 
 async def register_node(mesh_nodes, ctx, user: discord.User = None):
     """Send a Discord Modal to a user's DMs to fill out node info (node_id, short_name, long_name)."""
@@ -84,25 +87,25 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
         await loading_message.edit(content=f"❌ Failed to send DM: {e}")
 
 
-async def transfer_node(self, ctx, node_id: str, new_owner: discord.User):
+async def transfer_node(mesh_nodes, ctx, node_id: str, new_owner: discord.User):
     """
     Transfer ownership of a node you own to another user.
     Usage: !transfer <node_id> @username
     """
-    loading_message = await ctx.send(self.get_random_loading_message())
+    loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
 
     node_id = node_id.strip().upper()
     if len(node_id) != 8:
         await loading_message.edit(content="Node ID must be exactly 8 characters.")
         return
 
-    db_path = self.get_db_path()
+    db_path = mesh_nodes.get_db_path()
     if not os.path.exists(db_path):
         await loading_message.edit(content="Database not initialized.")
         return
 
     try:
-        with self.connect_db() as conn:
+        with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT discord_id FROM nodes WHERE UPPER(node_id) = ?",
@@ -239,10 +242,199 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
     except Exception as e:
         await loading_message.edit(content=f"❌ Failed to send DM: {e}")
 
-async def edit_additional_node_info(mesh_nodes, ctx, node_id: str):
+
+
+class QuestionView(View):
+    def __init__(self, ctx, question, finish_callback):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.question = question
+        self.finish_callback = finish_callback
+        self.answer = None
+
+        if isinstance(question, ChoiceQuestion):
+            select = Select(
+                placeholder=question.question,
+                options=[discord.SelectOption(label=choice, value=choice) for choice in question.choices]
+            )
+            select.callback = self.on_select
+            self.add_item(select)
+
+        elif isinstance(question, BooleanQuestion):
+            yes_btn = Button(label="Yes", style=discord.ButtonStyle.green)
+            no_btn = Button(label="No", style=discord.ButtonStyle.red)
+            yes_btn.callback = self.make_choice(True)
+            no_btn.callback = self.make_choice(False)
+            self.add_item(yes_btn)
+            self.add_item(no_btn)
+
+        elif isinstance(question, (StringQuestion, NumberQuestion)):
+            input_btn = Button(label="Enter Answer", style=discord.ButtonStyle.blurple)
+            input_btn.callback = self.open_modal
+            self.add_item(input_btn)
+
+        skip_btn = Button(label="Skip", style=discord.ButtonStyle.gray)
+        skip_btn.callback = self.skip
+        self.add_item(skip_btn)
+
+    async def on_select(self, interaction: discord.Interaction):
+        self.answer = interaction.data["values"][0]
+        await self.finish(interaction)
+
+    def make_choice(self, value):
+        async def inner(interaction: discord.Interaction):
+            self.answer = value
+            await self.finish(interaction)
+        return inner
+
+    async def open_modal(self, interaction: discord.Interaction):
+        class InputModal(Modal, title=self.question.human_name):
+            user_input = TextInput(label=self.question.question[:45])
+
+            async def on_submit(modal_self, interaction: discord.Interaction):
+                val = modal_self.user_input.value.strip()
+                if isinstance(self.question, NumberQuestion):
+                    try:
+                        val = int(val)
+                        if not (self.question.min_value <= val <= self.question.max_value):
+                            raise ValueError
+                    except:
+                        await interaction.response.send_message("Invalid number input.", ephemeral=True)
+                        return
+                elif isinstance(self.question, StringQuestion):
+                    if not (self.question.min_length <= len(val) <= self.question.max_length):
+                        await interaction.response.send_message("Input length out of bounds.", ephemeral=True)
+                        return
+
+                self.answer = val
+                # Respond to the modal interaction so Discord doesn't error
+                await interaction.response.send_message("Answer received!", ephemeral=True)
+                await self.finish(interaction)
+
+        await interaction.response.send_modal(InputModal())
+
+    async def skip(self, interaction: discord.Interaction):
+        self.answer = None
+        await self.finish(interaction)
+
+    async def finish(self, interaction: discord.Interaction):
+        await interaction.message.delete()
+        await self.finish_callback(self.answer)
+
+
+async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: list[AdditionalInfoQuestion] = additional_info_questions):
+    loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
+
+    node_id = node_id.strip().upper()
+    if len(node_id) != 8:
+        await loading_message.edit(content="Node ID must be exactly 8 characters.")
+        return
+
+    db_path = mesh_nodes.get_db_path()
+    if not os.path.exists(db_path):
+        await loading_message.edit(content="Database not initialized.")
+        return
+
+    # Check ownership and get current additional_node_data_json
+    try:
+        with mesh_nodes.connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT short_name, long_name, discord_id, additional_node_data_json FROM nodes WHERE UPPER(node_id) = ?",
+                (node_id.upper(),)
+            )
+            row = cursor.fetchone()
+            if not row:
+                await loading_message.edit(content=f"No node found with ID `{node_id}`.")
+                return
+            short_name, long_name, owner_id, additional_node_data_json = row
+            if str(ctx.author.id) != str(owner_id):
+                await loading_message.edit(content="You do not own this node.")
+                return
+            try:
+                existing_data = json.loads(additional_node_data_json) if additional_node_data_json else {}
+            except Exception:
+                existing_data = {}
+    except Exception as e:
+        await loading_message.edit(content=f"Database error: {e}")
+        return
+
+    answers = {}
+
+    try:
+        dm = await ctx.author.create_dm()
+    except Exception:
+        await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
+        return
+
+    await loading_message.edit(content="📬 Questions sent! Check your DMs and answer the questions. 💌")
+
+    async def handle_question(index: int, is_mobile_node: bool):
+        if index >= len(questions):
+            # Done: merge and update DB
+            result_json = {k: v for k, v in answers.items() if v is not None}
+            merged_data = {**existing_data, **result_json}
+            try:
+                with mesh_nodes.connect_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE nodes SET additional_node_data_json = ? WHERE UPPER(node_id) = ?",
+                        (json.dumps(merged_data), node_id.upper())
+                    )
+                    conn.commit()
+                await dm.send("✅ Additional node info updated successfully!")
+            except Exception as e:
+                await dm.send(f"❌ Failed to update additional node info: {e}")
+            return
+
+        q = questions[index]
+
+        # Skip question if is_mobile_node and q.hide_if_mobile is True
+        if is_mobile_node and q.hide_if_mobile:
+            await handle_question(index + 1, is_mobile_node)
+            return
+
+        async def callback(answer):
+            nonlocal is_mobile_node
+            if answer is not None:
+                answers[q.json_name] = answer
+                if q.json_name == "node_type" and answer in ["Pocket", "Vehicle"]:
+                    is_mobile_node = True
+                if q.json_name == "node_role" and answer in ["Client_Mute"]:
+                    is_mobile_node = True
+            await handle_question(index + 1, is_mobile_node)
+
+        view = QuestionView(ctx, q, callback)
+        await dm.send(q.question, view=view)
+
+    await handle_question(0, False)
+
+class ConfirmClearView(View):
+    def __init__(self, on_confirm, on_cancel, timeout=60):
+        super().__init__(timeout=timeout)
+        self.on_confirm = on_confirm
+        self.on_cancel = on_cancel
+        self.add_item(self.ConfirmButton())
+        self.add_item(self.CancelButton())
+
+    class ConfirmButton(Button):
+        def __init__(self):
+            super().__init__(label="Confirm", style=discord.ButtonStyle.danger)
+
+        async def callback(self, interaction: discord.Interaction):
+            await self.view.on_confirm(interaction)
+
+    class CancelButton(Button):
+        def __init__(self):
+            super().__init__(label="Cancel", style=discord.ButtonStyle.secondary)
+
+        async def callback(self, interaction: discord.Interaction):
+            await self.view.on_cancel(interaction)
+
+async def clear_additional_node_info(mesh_nodes, ctx, node_id: str):
     """
-    Prompt the user to enter additional node info as a base64 string for a given node ID.
-    Sends a DM with a button; clicking the button opens a modal for base64 input.
+    Clear the additional_node_data_json for a node you own.
+    Usage: !clear_additional <node_id>
     """
     loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
 
@@ -276,78 +468,35 @@ async def edit_additional_node_info(mesh_nodes, ctx, node_id: str):
         await loading_message.edit(content=f"Database error: {e}")
         return
 
-    # Modal for base64 string input
-    class AdditionalNodeInfoModal(Modal, title="Edit Additional Node Info"):
-        base64_string = TextInput(
-            label="Base64 String",
-            placeholder="Paste your node info code here",
-            required=True,
-            min_length=1,
-            max_length=4000
-        )
-
-        async def on_submit(self, interaction: discord.Interaction):
-            import json
-            b64 = self.base64_string.value.strip()
-            try:
-                parsed_response_dict = parse_additional_info_base64(b64)
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Invalid base64 string: {e}", ephemeral=True)
-                return
-
-            try:
-                # Fetch current additional_node_data_json
-                with mesh_nodes.connect_db() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT additional_node_data_json FROM nodes WHERE UPPER(node_id) = ?",
-                        (node_id.upper(),)
-                    )
-                    row = cursor.fetchone()
-                    if not row:
-                        await interaction.response.send_message("❌ Node not found in database.", ephemeral=True)
-                        return
-                    current_json = row[0] or "{}"
-                    try:
-                        current_data = json.loads(current_json)
-                    except Exception:
-                        current_data = {}
-
-                    # Merge parsed_response_dict into current_data
-                    merged_data = {**current_data, **parsed_response_dict}
-
-                    # Save merged data back to DB
-                    cursor.execute(
-                        "UPDATE nodes SET additional_node_data_json = ? WHERE UPPER(node_id) = ?",
-                        (json.dumps(merged_data), node_id.upper())
-                    )
-                    conn.commit()
-                await interaction.response.send_message("✅ Additional node info updated successfully!", ephemeral=True)
-            except Exception as e:
-                await interaction.response.send_message(f"❌ Failed to update node info: {e}", ephemeral=True)
-
-    # View with a button to trigger the modal
-    class AdditionalNodeInfoButtonView(View):
-        def __init__(self, timeout=180):
-            super().__init__(timeout=timeout)
-            self.add_item(self.AdditionalNodeInfoButton())
-
-        class AdditionalNodeInfoButton(Button):
-            def __init__(self):
-                super().__init__(label="Edit Additional Node Info", style=discord.ButtonStyle.primary)
-
-            async def callback(self, interaction: discord.Interaction):
-                modal = AdditionalNodeInfoModal()
-                await interaction.response.send_modal(modal)
-
     try:
         dm = await ctx.author.create_dm()
-        await dm.send(
-            f"Go to <https://mspmesh.github.io/tools/additional_info.html> and generate an info code.\nOnce you are done, click the button below to enter the code for your node `{node_id}`:",
-            view=AdditionalNodeInfoButtonView()
-        )
-        await loading_message.edit(content="📬 Button sent! Check your DMs and click the button to edit additional node info. 💌")
-    except discord.Forbidden:
+    except Exception:
         await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
-    except Exception as e:
-        await loading_message.edit(content=f"❌ Failed to send DM: {e}")
+        return
+
+    await loading_message.edit(content="📬 Confirmation sent! Check your DMs.")
+
+    async def on_confirm(interaction):
+        try:
+            with mesh_nodes.connect_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE nodes SET additional_node_data_json = ? WHERE UPPER(node_id) = ?",
+                    ("{}", node_id.upper())
+                )
+                conn.commit()
+            await interaction.response.send_message("✅ Additional node info cleared.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Failed to clear additional node info: {e}", ephemeral=True)
+        await interaction.message.delete()
+
+    async def on_cancel(interaction):
+        await interaction.response.send_message("❌ Clear cancelled.", ephemeral=True)
+        await interaction.message.delete()
+
+    view = ConfirmClearView(on_confirm, on_cancel)
+    await dm.send(
+        f"Are you sure you want to clear all additional info for node `{node_id}`?",
+        view=view
+    )
+
