@@ -1,7 +1,7 @@
+import os
 import discord
 from discord.ui import Button, View, Modal, TextInput
-import os
-
+from MeshNodes.shared.AdditionalNodeInfo import parse_additional_info_base64
 
 async def register_node(mesh_nodes, ctx, user: discord.User = None):
     """Send a Discord Modal to a user's DMs to fill out node info (node_id, short_name, long_name)."""
@@ -28,8 +28,8 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
                 with self_view.cog.connect_db() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT 1 FROM nodes WHERE node_id = ?",
-                        (node_id_val,)
+                        "SELECT 1 FROM nodes WHERE UPPER(node_id) = ?",
+                        (node_id_val.upper(),)
                     )
                     exists = cursor.fetchone()
                     if exists:
@@ -105,8 +105,8 @@ async def transfer_node(self, ctx, node_id: str, new_owner: discord.User):
         with self.connect_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT discord_id FROM nodes WHERE node_id = ?",
-                (node_id,)
+                "SELECT discord_id FROM nodes WHERE UPPER(node_id) = ?",
+                (node_id.upper(),)
             )
             row = cursor.fetchone()
             if not row:
@@ -117,8 +117,8 @@ async def transfer_node(self, ctx, node_id: str, new_owner: discord.User):
                 await loading_message.edit(content="You do not own this node.")
                 return
             cursor.execute(
-                "UPDATE nodes SET discord_id = ? WHERE node_id = ?",
-                (str(new_owner.id), node_id)
+                "UPDATE nodes SET discord_id = ? WHERE UPPER(node_id) = ?",
+                (str(new_owner.id), node_id.upper())
             )
             conn.commit()
         await loading_message.edit(content=f"✅ Node `{node_id}` ownership transferred to {new_owner.mention}.")
@@ -146,8 +146,8 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT short_name, long_name, discord_id FROM nodes WHERE node_id = ?",
-                (node_id,)
+                "SELECT short_name, long_name, discord_id FROM nodes WHERE UPPER(node_id) = ?",
+                (node_id.upper(),)
             )
             row = cursor.fetchone()
             if not row:
@@ -199,8 +199,8 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
                 with self_view.cog.connect_db() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        f"UPDATE nodes SET {', '.join(updates)} WHERE node_id = ?",
-                        params
+                        f"UPDATE nodes SET {', '.join(updates)} WHERE UPPER(node_id) = ?",
+                        params[:-1] + [node_id.upper()]
                     )
                     conn.commit()
                 await interaction.response.send_message("✅ Node updated successfully!", ephemeral=True)
@@ -234,6 +234,119 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
             view=EditNodeButtonView(short_name, long_name)
         )
         await loading_message.edit(content="📬 Button sent! Check your DMs and click the button to edit your node. 💌")
+    except discord.Forbidden:
+        await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
+    except Exception as e:
+        await loading_message.edit(content=f"❌ Failed to send DM: {e}")
+
+async def edit_additional_node_info(mesh_nodes, ctx, node_id: str):
+    """
+    Prompt the user to enter additional node info as a base64 string for a given node ID.
+    Sends a DM with a button; clicking the button opens a modal for base64 input.
+    """
+    loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
+
+    node_id = node_id.strip().upper()
+    if len(node_id) != 8:
+        await loading_message.edit(content="Node ID must be exactly 8 characters.")
+        return
+
+    db_path = mesh_nodes.get_db_path()
+    if not os.path.exists(db_path):
+        await loading_message.edit(content="Database not initialized.")
+        return
+
+    # Check ownership
+    try:
+        with mesh_nodes.connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT discord_id FROM nodes WHERE UPPER(node_id) = ?",
+                (node_id.upper(),)
+            )
+            row = cursor.fetchone()
+            if not row:
+                await loading_message.edit(content=f"No node found with ID `{node_id}`.")
+                return
+            owner_id = row[0]
+            if str(ctx.author.id) != str(owner_id):
+                await loading_message.edit(content="You do not own this node.")
+                return
+    except Exception as e:
+        await loading_message.edit(content=f"Database error: {e}")
+        return
+
+    # Modal for base64 string input
+    class AdditionalNodeInfoModal(Modal, title="Edit Additional Node Info"):
+        base64_string = TextInput(
+            label="Base64 String",
+            placeholder="Paste your node info code here",
+            required=True,
+            min_length=1,
+            max_length=4000
+        )
+
+        async def on_submit(self, interaction: discord.Interaction):
+            import json
+            b64 = self.base64_string.value.strip()
+            try:
+                parsed_response_dict = parse_additional_info_base64(b64)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Invalid base64 string: {e}", ephemeral=True)
+                return
+
+            try:
+                # Fetch current additional_node_data_json
+                with mesh_nodes.connect_db() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "SELECT additional_node_data_json FROM nodes WHERE UPPER(node_id) = ?",
+                        (node_id.upper(),)
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        await interaction.response.send_message("❌ Node not found in database.", ephemeral=True)
+                        return
+                    current_json = row[0] or "{}"
+                    try:
+                        current_data = json.loads(current_json)
+                    except Exception:
+                        current_data = {}
+
+                    # Merge parsed_response_dict into current_data
+                    merged_data = {**current_data, **parsed_response_dict}
+
+                    # Save merged data back to DB
+                    cursor.execute(
+                        "UPDATE nodes SET additional_node_data_json = ? WHERE UPPER(node_id) = ?",
+                        (json.dumps(merged_data), node_id.upper())
+                    )
+                    conn.commit()
+                await interaction.response.send_message("✅ Additional node info updated successfully!", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Failed to update node info: {e}", ephemeral=True)
+
+    # View with a button to trigger the modal
+    class AdditionalNodeInfoButtonView(View):
+        def __init__(self, timeout=180):
+            super().__init__(timeout=timeout)
+            self.add_item(self.AdditionalNodeInfoButton())
+
+        class AdditionalNodeInfoButton(Button):
+            def __init__(self):
+                super().__init__(label="Edit Additional Node Info", style=discord.ButtonStyle.primary)
+
+            async def callback(self, interaction: discord.Interaction):
+                modal = AdditionalNodeInfoModal()
+                await interaction.response.send_modal(modal)
+
+    try:
+        dm = await ctx.author.create_dm()
+        await dm.send(
+            f"Go to <https://mspmesh.github.io/tools/additional_info.html> and generate an info code.\nOnce you are done, click the button below to enter the code for your node `{node_id}`:",
+            view=AdditionalNodeInfoButtonView()
+        )
+        await loading_message.edit(content="📬 Button sent! Check your DMs and click the button to edit additional node info. 💌")
     except discord.Forbidden:
         await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
     except Exception as e:

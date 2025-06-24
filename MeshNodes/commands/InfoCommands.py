@@ -1,7 +1,9 @@
 import discord
 import os
+import re
 import json
 from discord.ui import View, Button
+from MeshNodes.shared.AdditionalNodeInfo import additional_info_questions
 
 async def total_nodes(self, ctx):
     """Counts the total number of unique node IDs in the database."""
@@ -78,18 +80,16 @@ async def list_my_nodes(mesh_nodes, ctx, user: discord.User = None):
 
     await loading_message.edit(content=None, embed=embed)
 
+def is_valid_maidenhead(self, locator: str) -> bool:
+    """Checks if a string matches the Maidenhead Locator (Grid Square) format."""
+    pattern = r"^[A-R]{2}[0-9]{2}([A-X]{2}([0-9]{2})?)?$"
+    return bool(re.fullmatch(pattern, locator.strip().upper()))
+
 def _get_node_details_embed(mesh_nodes, node_row):
     """
     Helper to build a Discord embed for full node info from a database row.
+    Shows basic info and any additional info fields present in the node's JSON.
     """
-    excluded_keys = {
-        "your discord username",
-        "timestamp",
-        "your discord user id",
-        "should your previous form entry be deleted, because you are submitting a new one to update old information?",
-        "column 8",
-        "adjustednodeid"
-    }
     # node_row: (node_id, discord_id, timestamp, short_name, long_name, additional_node_data_json)
     node_id, discord_id, timestamp, short_name, long_name, additional_node_data_json = node_row
 
@@ -104,13 +104,15 @@ def _get_node_details_embed(mesh_nodes, node_row):
         extra = json.loads(additional_node_data_json)
         maidenhead_key = "If a permanent install, where is this node placed?"
         grid_url_template = "https://www.levinecentral.com/ham/grid_square.php?&Grid={}&Zoom=13&sm=y"
-        for key, value in extra.items():
-            cleaned_key = key.strip().lower()
-            if cleaned_key not in excluded_keys:
-                if cleaned_key == maidenhead_key.lower() and mesh_nodes.is_valid_maidenhead(str(value)):
+        for q in additional_info_questions:
+            key = q.json_name
+            if key in extra:
+                value = extra[key]
+                # Show grid link if this is the maidenhead field and valid
+                if key.strip().lower() == maidenhead_key.lower() and mesh_nodes.is_valid_maidenhead(str(value)):
                     grid_url = grid_url_template.format(value)
                     value = f"[{value}]({grid_url})"
-                embed.add_field(name=key, value=str(value), inline=True)
+                embed.add_field(name=q.human_name, value=str(value), inline=True)
     except Exception as e:
         embed.add_field(name="Error", value=f"Failed to parse extra data: {e}", inline=False)
     return embed
@@ -129,8 +131,8 @@ async def run_nodefull_on_interaction(mesh_nodes, interaction: discord.Interacti
             cursor = conn.cursor()
             # Try by node_id (exact or partial from end)
             cursor.execute(
-                "SELECT * FROM nodes WHERE node_id = ? OR substr(node_id, -?) = ?",
-                (identifier, len(identifier), identifier)
+                "SELECT * FROM nodes WHERE UPPER(node_id) = ? OR UPPER(substr(node_id, -?)) = ?",
+                (identifier.upper(), len(identifier), identifier.upper())
             )
             node_row = cursor.fetchone()
             if not node_row:
@@ -174,8 +176,8 @@ async def node_info(mesh_nodes, ctx, *identifier: str):
             # Node ID: match from the end (last N chars)
             if len(identifier) <= 8:
                 cursor.execute(
-                    "SELECT node_id, short_name, long_name, discord_id FROM nodes WHERE substr(node_id, -?) = ?",
-                    (len(identifier), identifier)
+                    "SELECT node_id, short_name, long_name, discord_id FROM nodes WHERE UPPER(substr(node_id, -?)) = ?",
+                    (len(identifier), identifier.upper())
                 )
                 matches += cursor.fetchall()
             # Shortname and Longname: case-insensitive match
@@ -245,8 +247,8 @@ async def full_node_info(mesh_nodes, ctx, *identifier: str):
             cursor = conn.cursor()
             # Try by node_id (exact or partial from end)
             cursor.execute(
-                "SELECT * FROM nodes WHERE node_id = ? OR substr(node_id, -?) = ?",
-                (identifier, len(identifier), identifier)
+                "SELECT * FROM nodes WHERE UPPER(node_id) = ? OR UPPER(substr(node_id, -?)) = ?",
+                (identifier.upper(), len(identifier), identifier.upper())
             )
             node_row = cursor.fetchone()
             if not node_row:

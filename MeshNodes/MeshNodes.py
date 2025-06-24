@@ -1,13 +1,11 @@
 import discord
-from discord.ui import Button, View, Modal, TextInput
 from redbot.core import commands
 import sqlite3
-import json
 import os
 import logging
 import random
-import re
-from .commands.NodeEditCommands import edit_node, transfer_node, register_node
+
+from .commands.NodeEditCommands import edit_node, transfer_node, register_node, edit_additional_node_info
 from .commands.InfoCommands import list_my_nodes, total_nodes, full_node_info, node_info
 from .commands.DatabaseCommands import drop_database, create_database
 
@@ -18,10 +16,7 @@ logger = logging.getLogger(__name__)
 class MeshNodes(commands.Cog):
     """Mesh Node Management Cog"""
     
-    def is_valid_maidenhead(self, locator: str) -> bool:
-        """Checks if a string matches the Maidenhead Locator (Grid Square) format."""
-        pattern = r"^[A-R]{2}[0-9]{2}([A-X]{2}([0-9]{2})?)?$"
-        return bool(re.fullmatch(pattern, locator.strip().upper()))
+
     
     def get_db_path(self):
         """Returns the path to the SQLite database file."""
@@ -111,6 +106,10 @@ class MeshNodes(commands.Cog):
     @commands.command(name="editnode")
     async def editnode(self, ctx, node_id: str):
         await edit_node(self, ctx, node_id)
+    
+    @commands.command(name="editnodeinfo")
+    async def editnode(self, ctx, node_id: str):
+        await edit_additional_node_info(self, ctx, node_id)
 
     @commands.command(name="transfer")
     async def transfer(self, ctx, node_id: str, new_owner: discord.User):
