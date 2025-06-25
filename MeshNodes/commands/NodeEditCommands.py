@@ -53,6 +53,8 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
                     )
                     conn.commit()
                 await interaction.response.send_message("✅ Node paperwork submitted and saved!", ephemeral=True)
+                # Call edit_additional_node_info after successful registration
+                await edit_additional_node_info(mesh_nodes, ctx, node_id_val, is_automatic_edit=True)
             except Exception as e:
                 await interaction.response.send_message(f"❌ Failed to save node: {e}", ephemeral=True)
 
@@ -322,52 +324,58 @@ class QuestionView(View):
         await self.finish_callback(self.answer)
 
 
-async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: list[AdditionalInfoQuestion] = additional_info_questions):
-    loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
+async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: list[AdditionalInfoQuestion] = additional_info_questions, is_automatic_edit: bool = False):
+    if is_automatic_edit:
+        existing_data = {}
+        print("test")
+    else:
+        loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
 
-    node_id = node_id.strip().upper()
-    if len(node_id) != 8:
-        await loading_message.edit(content="Node ID must be exactly 8 characters.")
-        return
+        node_id = node_id.strip().upper()
+        if len(node_id) != 8:
+            await loading_message.edit(content="Node ID must be exactly 8 characters.")
+            return
 
-    db_path = mesh_nodes.get_db_path()
-    if not os.path.exists(db_path):
-        await loading_message.edit(content="Database not initialized.")
-        return
+        db_path = mesh_nodes.get_db_path()
+        if not os.path.exists(db_path):
+            await loading_message.edit(content="Database not initialized.")
+            return
 
-    # Check ownership and get current additional_node_data_json
-    try:
-        with mesh_nodes.connect_db() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT short_name, long_name, discord_id, additional_node_data_json FROM nodes WHERE UPPER(node_id) = ?",
-                (node_id.upper(),)
-            )
-            row = cursor.fetchone()
-            if not row:
-                await loading_message.edit(content=f"No node found with ID `{node_id}`.")
-                return
-            short_name, long_name, owner_id, additional_node_data_json = row
-            if str(ctx.author.id) != str(owner_id):
-                await loading_message.edit(content="You do not own this node.")
-                return
-            try:
-                existing_data = json.loads(additional_node_data_json) if additional_node_data_json else {}
-            except Exception:
-                existing_data = {}
-    except Exception as e:
-        await loading_message.edit(content=f"Database error: {e}")
-        return
-
-    answers = {}
+        # Check ownership and get current additional_node_data_json
+        try:
+            with mesh_nodes.connect_db() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT short_name, long_name, discord_id, additional_node_data_json FROM nodes WHERE UPPER(node_id) = ?",
+                    (node_id.upper(),)
+                )
+                row = cursor.fetchone()
+                if not row:
+                    await loading_message.edit(content=f"No node found with ID `{node_id}`.")
+                    return
+                short_name, long_name, owner_id, additional_node_data_json = row
+                if str(ctx.author.id) != str(owner_id):
+                    await loading_message.edit(content="You do not own this node.")
+                    return
+                try:
+                    existing_data = json.loads(additional_node_data_json) if additional_node_data_json else {}
+                except Exception:
+                    existing_data = {}
+        except Exception as e:
+            await loading_message.edit(content=f"Database error: {e}")
+            return
 
     try:
         dm = await ctx.author.create_dm()
     except Exception:
-        await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
+        if not is_automatic_edit:
+            await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
         return
 
-    await loading_message.edit(content="📬 Questions sent! Check your DMs and answer the questions. 💌")
+    if not is_automatic_edit:
+        await loading_message.edit(content="📬 Questions sent! Check your DMs and answer the questions. 💌")
+    
+    answers = {}
 
     async def handle_question(index: int, is_mobile_node: bool):
         if index >= len(questions):
