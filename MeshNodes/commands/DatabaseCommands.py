@@ -1,6 +1,7 @@
+import os
 import discord
 from discord.ui import Button, View
-import os
+
 
 async def double_confirm(_, ctx, step1_text, step2_text, cancel_text):
     view1 = ConfirmView(ctx.author.id, "Are you sure?")
@@ -25,10 +26,8 @@ async def create_database(mesh_nodes, ctx):
         await ctx.send("You do not have permission to perform this action.")
         return
 
-    msg = await mesh_nodes.double_confirm(ctx,
-        "This will create the database. Please confirm.",
-        "Final confirmation required.",
-        "Database creation cancelled."
+    msg = await mesh_nodes.double_confirm(
+        ctx, "This will create the database. Please confirm.", "Final confirmation required.", "Database creation cancelled."
     )
     if not msg:
         return
@@ -37,7 +36,8 @@ async def create_database(mesh_nodes, ctx):
     try:
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            cursor.execute(
+                """
                 CREATE TABLE IF NOT EXISTS nodes (
                     node_id TEXT PRIMARY KEY,
                     discord_id TEXT NOT NULL,
@@ -46,7 +46,8 @@ async def create_database(mesh_nodes, ctx):
                     long_name TEXT NOT NULL,
                     additional_node_data_json TEXT NOT NULL
                 )
-            """)
+            """
+            )
             conn.commit()
         await msg.edit(content=f"Database created at `{db_path}`.", view=None)
     except Exception as e:
@@ -58,10 +59,8 @@ async def drop_database(mesh_nodes, ctx):
         await ctx.send("You do not have permission to perform this action.")
         return
 
-    msg = await mesh_nodes.double_confirm(ctx,
-        "This will drop the database. Please confirm.",
-        "Final confirmation required.",
-        "Database drop cancelled."
+    msg = await mesh_nodes.double_confirm(
+        ctx, "This will drop the database. Please confirm.", "Final confirmation required.", "Database drop cancelled."
     )
     if not msg:
         return
@@ -76,6 +75,23 @@ async def drop_database(mesh_nodes, ctx):
     except Exception as e:
         await msg.edit(content=f"Failed to drop database: {e}", view=None)
 
+
+async def delete_node(mesh_nodes, ctx, node_id):
+    if ctx.author.id not in mesh_nodes.database_admin_ids:
+        await ctx.send("You do not have permission to perform this action.")
+        return
+
+    try:
+        with mesh_nodes.connect_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM nodes WHERE LOWER(node_id) = LOWER(?)", (node_id,))
+            if cursor.rowcount == 0:
+                await ctx.send(f"No node found with node_id `{node_id}`.")
+            else:
+                conn.commit()
+                await ctx.send(f"Node with node_id `{node_id}` has been deleted from the database.")
+    except Exception as e:
+        await ctx.send(f"Failed to delete node: {e}")
 
 
 class ConfirmView(View):

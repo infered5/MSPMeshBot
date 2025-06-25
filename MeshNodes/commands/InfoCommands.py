@@ -1,9 +1,11 @@
-import discord
 import os
 import re
 import json
-from discord.ui import View, Button, Select
+import discord
+
+from discord.ui import View, Button
 from MeshNodes.shared.AdditionalNodeInfo import additional_info_questions
+
 
 async def total_nodes(self, ctx):
     """Counts the total number of unique node IDs in the database."""
@@ -28,6 +30,7 @@ async def total_nodes(self, ctx):
     embed.add_field(name="Total Unique Node IDs", value=str(total_entries), inline=False)
     await loading_message.edit(content=None, embed=embed)
 
+
 async def list_my_nodes(mesh_nodes, ctx, user: discord.User = None):
     """Retrieve a list of nodes owned by a user."""
 
@@ -47,17 +50,10 @@ async def list_my_nodes(mesh_nodes, ctx, user: discord.User = None):
     try:
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT node_id, short_name, long_name FROM nodes WHERE discord_id = ?",
-                (user_id,)
-            )
+            cursor.execute("SELECT node_id, short_name, long_name FROM nodes WHERE discord_id = ?", (user_id,))
             rows = cursor.fetchall()
             for row in rows:
-                nodes.append({
-                    "Node ID": row[0],
-                    "Node Shortname": row[1],
-                    "Node Longname": row[2]
-                })
+                nodes.append({"Node ID": row[0], "Node Shortname": row[1], "Node Longname": row[2]})
     except Exception as e:
         await loading_message.edit(content=f"Database error: {e}")
         return
@@ -66,24 +62,23 @@ async def list_my_nodes(mesh_nodes, ctx, user: discord.User = None):
         await loading_message.edit(content=f"No nodes found for {user.display_name}.")
         return
 
-    embed = discord.Embed(
-        title=f"Nodes owned by {user.display_name}",
-        color=discord.Color.green()
-    )
+    embed = discord.Embed(title=f"Nodes owned by {user.display_name}", color=discord.Color.green())
 
     for node in nodes:
         embed.add_field(
             name=node.get("Node Longname", "Unknown Node"),
             value=f"**Shortname:** {node.get('Node Shortname', 'N/A')}\n**Node ID:** {node.get('Node ID', 'N/A')}",
-            inline=False
+            inline=False,
         )
 
     await loading_message.edit(content=None, embed=embed)
+
 
 def is_valid_maidenhead(self, locator: str) -> bool:
     """Checks if a string matches the Maidenhead Locator (Grid Square) format."""
     pattern = r"^[A-R]{2}[0-9]{2}([A-X]{2}([0-9]{2})?)?$"
     return bool(re.fullmatch(pattern, locator.strip().upper()))
+
 
 def _get_node_details_embed(mesh_nodes, node_row):
     """
@@ -117,6 +112,7 @@ def _get_node_details_embed(mesh_nodes, node_row):
         embed.add_field(name="Error", value=f"Failed to parse extra data: {e}", inline=False)
     return embed
 
+
 async def run_nodefull_on_interaction(mesh_nodes, interaction: discord.Interaction, identifier: str):
     """Runs the nodefull command on behalf of the user who clicked the button, using the new database."""
     loading_message = await interaction.channel.send(mesh_nodes.get_random_loading_message())
@@ -132,14 +128,14 @@ async def run_nodefull_on_interaction(mesh_nodes, interaction: discord.Interacti
             # Try by node_id (exact or partial from end)
             cursor.execute(
                 "SELECT * FROM nodes WHERE UPPER(node_id) = ? OR UPPER(substr(node_id, -?)) = ?",
-                (identifier.upper(), len(identifier), identifier.upper())
+                (identifier.upper(), len(identifier), identifier.upper()),
             )
             node_row = cursor.fetchone()
             if not node_row:
                 # Try by long_name or short_name (case-insensitive)
                 cursor.execute(
                     "SELECT * FROM nodes WHERE lower(long_name) = ? OR lower(short_name) = ?",
-                    (identifier.lower(), identifier.lower())
+                    (identifier.lower(), identifier.lower()),
                 )
                 node_row = cursor.fetchone()
     except Exception as e:
@@ -177,13 +173,13 @@ async def node_info(mesh_nodes, ctx, *identifier: str):
             if len(identifier) <= 8:
                 cursor.execute(
                     "SELECT node_id, short_name, long_name, discord_id FROM nodes WHERE UPPER(substr(node_id, -?)) = ?",
-                    (len(identifier), identifier.upper())
+                    (len(identifier), identifier.upper()),
                 )
                 matches += cursor.fetchall()
             # Shortname and Longname: case-insensitive match
             cursor.execute(
                 "SELECT node_id, short_name, long_name, discord_id FROM nodes WHERE lower(short_name) = ? OR lower(long_name) = ?",
-                (identifier.lower(), identifier.lower())
+                (identifier.lower(), identifier.lower()),
             )
             matches += [row for row in cursor.fetchall() if row not in matches]
     except Exception as e:
@@ -199,33 +195,27 @@ async def node_info(mesh_nodes, ctx, *identifier: str):
         )
         return
 
-    embed = discord.Embed(
-        title=f"Node Info Results ({len(matches)})",
-        color=discord.Color.green()
-    )
+    embed = discord.Embed(title=f"Node Info Results ({len(matches)})", color=discord.Color.green())
 
     view = View()
     for idx, (node_id, short_name, long_name, owner_id) in enumerate(matches):
         embed.add_field(
-            name=long_name,
-            value=f"**Shortname:** {short_name}\n**Node ID:** {node_id}\n**Owner:** <@{owner_id}>",
-            inline=False
+            name=long_name, value=f"**Shortname:** {short_name}\n**Node ID:** {node_id}\n**Owner:** <@{owner_id}>", inline=False
         )
         # Add a button for each node
-        button = Button(
-            label=f"View Full Node Info ({long_name})",
-            custom_id=f"nodefull_{node_id}_{idx}"
-        )
+        button = Button(label=f"View Full Node Info ({long_name})", custom_id=f"nodefull_{node_id}_{idx}")
+
         async def make_callback(node_id=node_id):
             async def button_callback(interaction: discord.Interaction):
                 await interaction.response.defer()
                 await run_nodefull_on_interaction(mesh_nodes, interaction, node_id)
+
             return button_callback
+
         button.callback = await make_callback()
         view.add_item(button)
 
     await loading_message.edit(content=None, embed=embed, view=view)
-
 
 
 async def full_node_info(mesh_nodes, ctx, *identifier: str):
@@ -248,14 +238,14 @@ async def full_node_info(mesh_nodes, ctx, *identifier: str):
             # Try by node_id (exact or partial from end)
             cursor.execute(
                 "SELECT * FROM nodes WHERE UPPER(node_id) = ? OR UPPER(substr(node_id, -?)) = ?",
-                (identifier.upper(), len(identifier), identifier.upper())
+                (identifier.upper(), len(identifier), identifier.upper()),
             )
             node_row = cursor.fetchone()
             if not node_row:
                 # Try by long_name or short_name (case-insensitive)
                 cursor.execute(
                     "SELECT * FROM nodes WHERE lower(long_name) = ? OR lower(short_name) = ?",
-                    (identifier.lower(), identifier.lower())
+                    (identifier.lower(), identifier.lower()),
                 )
                 node_row = cursor.fetchone()
     except Exception as e:

@@ -1,9 +1,16 @@
 import os
-import discord
 import json
+import discord
 
 from discord.ui import Button, View, Modal, TextInput, Select
-from MeshNodes.shared.AdditionalNodeInfo import AdditionalInfoQuestion, StringQuestion, BooleanQuestion, NumberQuestion, ChoiceQuestion, additional_info_questions
+from MeshNodes.shared.AdditionalNodeInfo import (
+    AdditionalInfoQuestion,
+    StringQuestion,
+    BooleanQuestion,
+    NumberQuestion,
+    ChoiceQuestion,
+    additional_info_questions,
+)
 
 
 async def register_node(mesh_nodes, ctx, user: discord.User = None):
@@ -20,9 +27,15 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
 
     # Modal definition
     class NodePaperworkModal(Modal, title="Node Paperwork Submission"):
-        node_id = TextInput(label="Node ID", placeholder="Enter Node ID (e.g. 1A2B3C4D)", required=True, min_length=8, max_length=8)
-        short_name = TextInput(label="Short Name", placeholder="Short name (e.g. MSP)", required=True, min_length=1, max_length=4)
-        long_name = TextInput(label="Long Name", placeholder="Long descriptive name", required=True, min_length=1, max_length=64)
+        node_id = TextInput(
+            label="Node ID", placeholder="Enter Node ID (e.g. 1A2B3C4D)", required=True, min_length=8, max_length=8
+        )
+        short_name = TextInput(
+            label="Short Name", placeholder="Short name (e.g. MSP)", required=True, min_length=1, max_length=4
+        )
+        long_name = TextInput(
+            label="Long Name", placeholder="Long descriptive name", required=True, min_length=1, max_length=64
+        )
 
         async def on_submit(self, interaction: discord.Interaction):
             node_id_val = self.node_id.value.strip().upper()
@@ -30,26 +43,17 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
             try:
                 with self_view.cog.connect_db() as conn:
                     cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT 1 FROM nodes WHERE UPPER(node_id) = ?",
-                        (node_id_val.upper(),)
-                    )
+                    cursor.execute("SELECT 1 FROM nodes WHERE UPPER(node_id) = ?", (node_id_val.upper(),))
                     exists = cursor.fetchone()
                     if exists:
                         await interaction.response.send_message(
                             f"❌ Node with ID `{node_id_val}` already exists in the database. Please use a different Node ID or use `!editnode` to update.",
-                            ephemeral=True
+                            ephemeral=True,
                         )
                         return
                     cursor.execute(
                         "INSERT INTO nodes (node_id, discord_id, short_name, long_name, additional_node_data_json) VALUES (?, ?, ?, ?, ?)",
-                        (
-                            node_id_val,
-                            str(user.id),
-                            self.short_name.value.strip(),
-                            self.long_name.value.strip(),
-                            "{}"
-                        )
+                        (node_id_val, str(user.id), self.short_name.value.strip(), self.long_name.value.strip(), "{}"),
                     )
                     conn.commit()
                 await interaction.response.send_message("✅ Node paperwork submitted and saved!", ephemeral=True)
@@ -78,10 +82,7 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
 
     try:
         dm = await user.create_dm()
-        await dm.send(
-            "Please click the button below to fill out the node paperwork form:",
-            view=PaperworkButtonView()
-        )
+        await dm.send("Please click the button below to fill out the node paperwork form:", view=PaperworkButtonView())
         await loading_message.edit(content="📬 Button sent! Check your DMs and click the button to fill out the form. 💌")
     except discord.Forbidden:
         await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
@@ -109,10 +110,7 @@ async def transfer_node(mesh_nodes, ctx, node_id: str, new_owner: discord.User):
     try:
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT discord_id FROM nodes WHERE UPPER(node_id) = ?",
-                (node_id.upper(),)
-            )
+            cursor.execute("SELECT discord_id FROM nodes WHERE UPPER(node_id) = ?", (node_id.upper(),))
             row = cursor.fetchone()
             if not row:
                 await loading_message.edit(content=f"No node found with ID `{node_id}`.")
@@ -121,14 +119,12 @@ async def transfer_node(mesh_nodes, ctx, node_id: str, new_owner: discord.User):
             if str(ctx.author.id) != str(owner_id):
                 await loading_message.edit(content="You do not own this node.")
                 return
-            cursor.execute(
-                "UPDATE nodes SET discord_id = ? WHERE UPPER(node_id) = ?",
-                (str(new_owner.id), node_id.upper())
-            )
+            cursor.execute("UPDATE nodes SET discord_id = ? WHERE UPPER(node_id) = ?", (str(new_owner.id), node_id.upper()))
             conn.commit()
         await loading_message.edit(content=f"✅ Node `{node_id}` ownership transferred to {new_owner.mention}.")
     except Exception as e:
         await loading_message.edit(content=f"❌ Failed to transfer node: {e}")
+
 
 async def edit_node(mesh_nodes, ctx, node_id: str):
     """
@@ -150,10 +146,7 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
     try:
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT short_name, long_name, discord_id FROM nodes WHERE UPPER(node_id) = ?",
-                (node_id.upper(),)
-            )
+            cursor.execute("SELECT short_name, long_name, discord_id FROM nodes WHERE UPPER(node_id) = ?", (node_id.upper(),))
             row = cursor.fetchone()
             if not row:
                 await loading_message.edit(content=f"No node found with ID `{node_id}`.")
@@ -175,14 +168,14 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
                 placeholder=f"Current: {short_name_val}",
                 required=False,
                 min_length=0,
-                max_length=4
+                max_length=4,
             )
             self.long_name = TextInput(
                 label="Long Name (leave blank to keep unchanged)",
                 placeholder=f"Current: {long_name_val}",
                 required=False,
                 min_length=0,
-                max_length=64
+                max_length=64,
             )
             self.add_item(self.short_name)
             self.add_item(self.long_name)
@@ -205,7 +198,7 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
                     cursor = conn.cursor()
                     cursor.execute(
                         f"UPDATE nodes SET {', '.join(updates)} WHERE UPPER(node_id) = ?",
-                        params[:-1] + [node_id.upper()]
+                        params[:-1] + [node_id.upper()],
                     )
                     conn.commit()
                 await interaction.response.send_message("✅ Node updated successfully!", ephemeral=True)
@@ -234,16 +227,12 @@ async def edit_node(mesh_nodes, ctx, node_id: str):
 
     try:
         dm = await ctx.author.create_dm()
-        await dm.send(
-            f"Click the button below to edit your node `{node_id}`:",
-            view=EditNodeButtonView(short_name, long_name)
-        )
+        await dm.send(f"Click the button below to edit your node `{node_id}`:", view=EditNodeButtonView(short_name, long_name))
         await loading_message.edit(content="📬 Button sent! Check your DMs and click the button to edit your node. 💌")
     except discord.Forbidden:
         await loading_message.edit(content="❌ I couldn't DM you! Please enable DMs from server members.")
     except Exception as e:
         await loading_message.edit(content=f"❌ Failed to send DM: {e}")
-
 
 
 class QuestionView(View):
@@ -257,7 +246,7 @@ class QuestionView(View):
         if isinstance(question, ChoiceQuestion):
             select = Select(
                 placeholder=question.question,
-                options=[discord.SelectOption(label=choice, value=choice) for choice in question.choices]
+                options=[discord.SelectOption(label=choice, value=choice) for choice in question.choices],
             )
             select.callback = self.on_select
             self.add_item(select)
@@ -287,6 +276,7 @@ class QuestionView(View):
         async def inner(interaction: discord.Interaction):
             self.answer = value
             await self.finish(interaction)
+
         return inner
 
     async def open_modal(self, interaction: discord.Interaction):
@@ -324,7 +314,13 @@ class QuestionView(View):
         await self.finish_callback(self.answer)
 
 
-async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: list[AdditionalInfoQuestion] = additional_info_questions, is_automatic_edit: bool = False):
+async def edit_additional_node_info(
+    mesh_nodes,
+    ctx,
+    node_id: str,
+    questions: list[AdditionalInfoQuestion] = additional_info_questions,
+    is_automatic_edit: bool = False,
+):
     if is_automatic_edit:
         existing_data = {}
         print("test")
@@ -347,7 +343,7 @@ async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: li
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT short_name, long_name, discord_id, additional_node_data_json FROM nodes WHERE UPPER(node_id) = ?",
-                    (node_id.upper(),)
+                    (node_id.upper(),),
                 )
                 row = cursor.fetchone()
                 if not row:
@@ -374,7 +370,7 @@ async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: li
 
     if not is_automatic_edit:
         await loading_message.edit(content="📬 Questions sent! Check your DMs and answer the questions. 💌")
-    
+
     answers = {}
 
     async def handle_question(index: int, is_mobile_node: bool):
@@ -387,7 +383,7 @@ async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: li
                     cursor = conn.cursor()
                     cursor.execute(
                         "UPDATE nodes SET additional_node_data_json = ? WHERE UPPER(node_id) = ?",
-                        (json.dumps(merged_data), node_id.upper())
+                        (json.dumps(merged_data), node_id.upper()),
                     )
                     conn.commit()
                 await dm.send("✅ Additional node info updated successfully!")
@@ -417,6 +413,7 @@ async def edit_additional_node_info(mesh_nodes, ctx, node_id: str, questions: li
 
     await handle_question(0, False)
 
+
 class ConfirmClearView(View):
     def __init__(self, on_confirm, on_cancel, timeout=60):
         super().__init__(timeout=timeout)
@@ -439,6 +436,7 @@ class ConfirmClearView(View):
         async def callback(self, interaction: discord.Interaction):
             await self.view.on_cancel(interaction)
 
+
 async def clear_additional_node_info(mesh_nodes, ctx, node_id: str):
     """
     Clear the additional_node_data_json for a node you own.
@@ -460,10 +458,7 @@ async def clear_additional_node_info(mesh_nodes, ctx, node_id: str):
     try:
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT discord_id FROM nodes WHERE UPPER(node_id) = ?",
-                (node_id.upper(),)
-            )
+            cursor.execute("SELECT discord_id FROM nodes WHERE UPPER(node_id) = ?", (node_id.upper(),))
             row = cursor.fetchone()
             if not row:
                 await loading_message.edit(content=f"No node found with ID `{node_id}`.")
@@ -489,8 +484,7 @@ async def clear_additional_node_info(mesh_nodes, ctx, node_id: str):
             with mesh_nodes.connect_db() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "UPDATE nodes SET additional_node_data_json = ? WHERE UPPER(node_id) = ?",
-                    ("{}", node_id.upper())
+                    "UPDATE nodes SET additional_node_data_json = ? WHERE UPPER(node_id) = ?", ("{}", node_id.upper())
                 )
                 conn.commit()
             await interaction.response.send_message("✅ Additional node info cleared.", ephemeral=True)
@@ -503,8 +497,4 @@ async def clear_additional_node_info(mesh_nodes, ctx, node_id: str):
         await interaction.message.delete()
 
     view = ConfirmClearView(on_confirm, on_cancel)
-    await dm.send(
-        f"Are you sure you want to clear all additional info for node `{node_id}`?",
-        view=view
-    )
-
+    await dm.send(f"Are you sure you want to clear all additional info for node `{node_id}`?", view=view)

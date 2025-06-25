@@ -1,10 +1,25 @@
 {
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.rulers": [
+            128
+        ]
+    },
+    "black-formatter.args": [
+        "-l 128"
+    ],
     "cSpell.words": [
+        "clearinfo",
         "createdb",
+        "deletenode",
         "editnode",
+        "editnodeinfo",
         "nodefull",
+        "nodeinfo",
         "nodetotal",
         "redbot",
-        "totalnodes"
+        "totalnodes",
+        "whohas"
     ]
 }
