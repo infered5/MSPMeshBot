@@ -12,6 +12,28 @@ from MeshNodes.shared.AdditionalNodeInfo import (
     additional_info_questions,
 )
 
+async def import_csv(mesh_nodes, ctx, user: discord.User = None):
+    loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
+
+    if not user:
+        user = ctx.author
+    
+    db_path = mesh_nodes.get_db_path()
+    if not os.path.exists(db_path):
+        await loading_message.edit(content="Database not initialized.")
+        return
+    
+
+    # Find the first CSV attachment
+    attachments = ctx.message.attachments
+    csv_attachment = next((a for a in attachments if a.filename.endswith('.csv')), None)
+    if not csv_attachment:
+        await ctx.send("No CSV file found in the message.")
+        return
+    # respond with the content of the CSV file
+    csv_content = await csv_attachment.read()
+    csv_string = csv_content.decode('utf-8')
+    
 
 async def register_node(mesh_nodes, ctx, user: discord.User = None):
     """Send a Discord Modal to a user's DMs to fill out node info (node_id, short_name, long_name)."""

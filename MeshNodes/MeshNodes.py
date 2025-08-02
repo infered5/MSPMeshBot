@@ -8,6 +8,7 @@ from redbot.core import commands
 
 from .commands.NodeEditCommands import (
     edit_node,
+    import_csv,
     transfer_node,
     register_node,
     edit_additional_node_info,
@@ -98,6 +99,10 @@ class MeshNodes(commands.Cog):
     #########################
     # Node Editing Commands #
     #########################
+    @commands.command(name="importnodes")
+    async def import_nodes(self, ctx, user: discord.User = None):
+        await import_csv(self, ctx, user)
+
     @commands.command(name="paperwork")
     async def paperwork(self, ctx, user: discord.User = None):
         await register_node(self, ctx, user)

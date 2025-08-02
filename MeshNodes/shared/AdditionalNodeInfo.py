@@ -43,7 +43,7 @@ additional_info_questions = [
         json_name="node_role",
         human_name="Node Role",
         question="What is the node's role?",
-        choices=["Client", "Client_Mute", "Router", "Router_Late"],
+        choices=["Client", "Client_Mute", "Client_Hidden", "Router", "Router_Late"],
         hide_if_mobile=False,
     ),
     StringQuestion(
