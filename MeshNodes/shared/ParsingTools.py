@@ -39,24 +39,8 @@ def parse_csv_string(csv_string: str) -> list[dict]:
 
     return [dict(zip(headers, row)) for row in data_rows]
 
-def filter_node_ids_length_8(data: list[dict]) -> list[dict]:
+def filter_node_ids_length(data: list[dict]) -> list[dict]:
     """
     Filter entries where 'node_id' has exactly 8 characters.
     """
     return [entry for entry in data if len(entry.get("node_id", "")) == 8]
-
-if __name__ == "__main__":
-    try:
-        with open("test.csv", "r", encoding="utf-8") as f:
-            csv_data = f.read()
-
-        parsed_data = parse_csv_string(csv_data)
-        filtered_data = filter_node_ids_length_8(parsed_data)
-        print("Filtered CSV data (node_id length 8):")
-        for entry in filtered_data:
-            print(entry)
-
-    except ValueError as e:
-        print(f"Error parsing CSV: {e}")
-    except FileNotFoundError:
-        print("File test.csv not found")

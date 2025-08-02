@@ -1,5 +1,6 @@
 import os
 import json
+from MeshNodes.shared.ParsingTools import filter_node_ids_length, parse_csv_string
 import discord
 
 from discord.ui import Button, View, Modal, TextInput, Select
@@ -23,17 +24,56 @@ async def import_csv(mesh_nodes, ctx, user: discord.User = None):
         await loading_message.edit(content="Database not initialized.")
         return
     
-
     # Find the first CSV attachment
     attachments = ctx.message.attachments
     csv_attachment = next((a for a in attachments if a.filename.endswith('.csv')), None)
     if not csv_attachment:
         await ctx.send("No CSV file found in the message.")
         return
+
     # respond with the content of the CSV file
     csv_content = await csv_attachment.read()
     csv_string = csv_content.decode('utf-8')
-    
+    parsed_data = parse_csv_string(csv_string)
+    filtered_data = filter_node_ids_length(parsed_data)
+
+    # Insert or overwrite into database
+    try:
+        with mesh_nodes.connect_db() as conn:
+            cursor = conn.cursor()
+            for entry in filtered_data:
+                node_id = entry["node_id"].strip().upper()
+                short_name = entry["short_name"].strip()
+                long_name = entry["long_name"].strip()
+                discord_id = str(user.id)
+
+                # All other fields go into JSON
+                extra_fields = {
+                    k: v for k, v in entry.items()
+                    if k not in ("node_id", "discord_id", "short_name", "long_name")
+                }
+
+                cursor.execute(
+                    """
+                    INSERT OR REPLACE INTO nodes
+                    (node_id, discord_id, short_name, long_name, additional_node_data_json)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        node_id,
+                        discord_id,
+                        short_name,
+                        long_name,
+                        json.dumps(extra_fields),
+                    ),
+                )
+            conn.commit()
+        await loading_message.edit(
+            content=f"✅ Imported {len(filtered_data)} nodes (from {len(parsed_data)} total rows)."
+        )
+    except Exception as e:
+        await loading_message.edit(content=f"❌ Failed to import CSV: {e}")
+
 
 async def register_node(mesh_nodes, ctx, user: discord.User = None):
     """Send a Discord Modal to a user's DMs to fill out node info (node_id, short_name, long_name)."""
