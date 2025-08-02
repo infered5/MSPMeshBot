@@ -99,10 +99,6 @@ class MeshNodes(commands.Cog):
     #########################
     # Node Editing Commands #
     #########################
-    @commands.command(name="importnodes")
-    async def import_nodes(self, ctx, user: discord.User = None):
-        await import_csv(self, ctx, user)
-
     @commands.command(name="paperwork")
     async def paperwork(self, ctx, user: discord.User = None):
         await register_node(self, ctx, user)
@@ -144,6 +140,11 @@ class MeshNodes(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def deletenode(self, ctx, node_id: str):
         await delete_node(self, ctx, node_id)
+    
+    @commands.command(name="importnodes")
+    @commands.has_permissions(administrator=True)
+    async def import_nodes(self, ctx, user: discord.User = None):
+        await import_csv(self, ctx, user)
 
     ################################
     # Database management commands #

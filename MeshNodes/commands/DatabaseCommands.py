@@ -26,7 +26,7 @@ async def create_database(mesh_nodes, ctx):
         await ctx.send("You do not have permission to perform this action.")
         return
 
-    msg = await mesh_nodes.double_confirm(
+    msg = await double_confirm(
         ctx, "This will create the database. Please confirm.", "Final confirmation required.", "Database creation cancelled."
     )
     if not msg:
@@ -59,7 +59,7 @@ async def drop_database(mesh_nodes, ctx):
         await ctx.send("You do not have permission to perform this action.")
         return
 
-    msg = await mesh_nodes.double_confirm(
+    msg = await double_confirm(
         ctx, "This will drop the database. Please confirm.", "Final confirmation required.", "Database drop cancelled."
     )
     if not msg:
