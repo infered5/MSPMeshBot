@@ -42,10 +42,11 @@ async def import_csv(mesh_nodes, ctx, user: discord.User = None):
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
             for entry in filtered_data:
+                # Map core fields
                 node_id = entry["node_id"].strip().upper()
+                discord_id = entry["discord_id"].strip()
                 short_name = entry["short_name"].strip()
                 long_name = entry["long_name"].strip()
-                discord_id = str(user.id)
 
                 # All other fields go into JSON
                 extra_fields = {
