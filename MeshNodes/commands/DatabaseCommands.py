@@ -3,7 +3,7 @@ import discord
 from discord.ui import Button, View
 
 
-async def double_confirm(_, ctx, step1_text, step2_text, cancel_text):
+async def double_confirm(ctx, step1_text, step2_text, cancel_text):
     view1 = ConfirmView(ctx.author.id, "Are you sure?")
     msg = await ctx.send(step1_text, view=view1)
     await view1.wait()
