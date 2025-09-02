@@ -77,7 +77,7 @@ async def drop_database(mesh_nodes, ctx):
         await msg.edit(content=f"Failed to drop database: {e}", view=None)
 
 
-async def delete_node(mesh_nodes, ctx, node_id):
+async def delete_node(mesh_nodes, ctx, node_id: str):
     loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
     try:
         with mesh_nodes.connect_db() as conn:
