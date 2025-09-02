@@ -89,7 +89,7 @@ async def delete_node(mesh_nodes, ctx, node_id):
 
             owner_id = row[0]
             # Allow if user is owner OR an admin
-            if str(ctx.author.id) != str(owner_id) and ctx.author.id not in mesh_nodes.database_admin_ids:
+            if str(ctx.author.id) != str(owner_id) or ctx.author.id not in mesh_nodes.database_admin_ids:
                 await ctx.send("You do not have permission to perform this action.")
                 return
 
