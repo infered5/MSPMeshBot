@@ -77,21 +77,27 @@ async def drop_database(mesh_nodes, ctx):
 
 
 async def delete_node(mesh_nodes, ctx, node_id):
-    if ctx.author.id not in mesh_nodes.database_admin_ids:
-        await ctx.send("You do not have permission to perform this action.")
-        return
-
     try:
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM nodes WHERE LOWER(node_id) = LOWER(?)", (node_id,))
-            if cursor.rowcount == 0:
+            cursor.execute("SELECT discord_id FROM nodes WHERE LOWER(node_id) = LOWER(?)", (node_id,))
+            row = cursor.fetchone()
+            if not row:
                 await ctx.send(f"No node found with node_id `{node_id}`.")
-            else:
-                conn.commit()
-                await ctx.send(f"Node with node_id `{node_id}` has been deleted from the database.")
+                return
+
+            owner_id = row[0]
+            # Allow if user is owner OR an admin
+            if str(ctx.author.id) != str(owner_id) and ctx.author.id not in mesh_nodes.database_admin_ids:
+                await ctx.send("You do not have permission to perform this action.")
+                return
+
+            cursor.execute("DELETE FROM nodes WHERE LOWER(node_id) = LOWER(?)", (node_id,))
+            conn.commit()
+            await ctx.send(f"Node with node_id `{node_id}` has been deleted from the database.")
     except Exception as e:
         await ctx.send(f"Failed to delete node: {e}")
+
 
 
 class ConfirmView(View):
