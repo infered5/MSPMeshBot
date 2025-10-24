@@ -137,7 +137,7 @@ class MeshNodes(commands.Cog):
         await drop_database(self, ctx)
 
     @commands.command(name="deletenode")
-    @commands.has_permissions(administrator=True)
+    #@commands.has_permissions(administrator=True)
     async def deletenode(self, ctx, node_id: str):
         await delete_node(self, ctx, node_id)
     
