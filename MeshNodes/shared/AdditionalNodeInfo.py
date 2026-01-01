@@ -110,7 +110,7 @@ additional_info_questions = [
     NumberQuestion(
         json_name="antenna_height",
         human_name="Antenna Height",
-        question="How high is the base of the antenna above sea level in feet? This can be found using google earth or similar tools.",
+        question="How high is the base of the antenna above sea level in feet? This can be found using google earth or similar tools. Min 600, Max 2300",
         min_value=600,  # Lowest point in MN is Lake Superior at 600 feet above sea level
         max_value=2500,  # Highest point in MN is Eagle Mountain at 2301 feet above sea level
         hide_if_mobile=True,
