@@ -102,7 +102,7 @@ additional_info_questions = [
     NumberQuestion(
         json_name="antenna_dbi",
         human_name="Antenna dBi",
-        question="What is the antenna gain in dBi?",
+        question="What is the antenna gain in dBi? Numbers only.",
         min_value=0,
         max_value=100,
         hide_if_mobile=True,
