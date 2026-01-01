@@ -91,7 +91,7 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
     # Modal definition
     class NodePaperworkModal(Modal, title="Node Paperwork Submission"):
         node_id = TextInput(
-            label="Node ID", placeholder="Enter Node ID (e.g. 1A2B3C4D)", required=True, min_length=8, max_length=8
+            label="Node ID", placeholder="Enter Node ID (e.g. 1A2B3C4D)", required=True, min_length=8, max_length=9
         )
         short_name = TextInput(
             label="Short Name", placeholder="Short name (e.g. MSP)", required=True, min_length=1, max_length=4
@@ -101,7 +101,11 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
         )
 
         async def on_submit(self, interaction: discord.Interaction):
-            node_id_val = self.node_id.value.strip().upper()
+            node_id_id = self.node_id.value.strip()
+            #drop ! if present and 9 max
+            if raw_node_id.startswith("!"):
+                raw_node_id = raw_node_id[1:]
+            node_id_val = raw_node_id.upper()
             # Check if node already exists
             try:
                 with self_view.cog.connect_db() as conn:
