@@ -101,7 +101,7 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
         )
 
         async def on_submit(self, interaction: discord.Interaction):
-            node_id_id = self.node_id.value.strip()
+            raw_node_id = self.node_id.value.strip()
             #drop ! if present and 9 max
             if raw_node_id.startswith("!"):
                 raw_node_id = raw_node_id[1:]
