@@ -2,6 +2,7 @@ import os
 import re
 import json
 import discord
+from redbot.core.utils.menus import menu, DEFAULT_CONTROLS
 
 from discord.ui import View, Button
 from MeshNodes.shared.AdditionalNodeInfo import additional_info_questions
@@ -37,7 +38,6 @@ async def list_my_nodes(mesh_nodes, ctx, user: discord.User = None):
     loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
 
     if not user:
-        # Default to the author if no user is mentioned
         user = ctx.author
 
     user_id = str(user.id)
@@ -50,28 +50,63 @@ async def list_my_nodes(mesh_nodes, ctx, user: discord.User = None):
     try:
         with mesh_nodes.connect_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT node_id, short_name, long_name FROM nodes WHERE discord_id = ?", (user_id,))
+            cursor.execute(
+                "SELECT node_id, short_name, long_name FROM nodes WHERE discord_id = ?",
+                (user_id,),
+            )
             rows = cursor.fetchall()
             for row in rows:
-                nodes.append({"Node ID": row[0], "Node Shortname": row[1], "Node Longname": row[2]})
+                nodes.append(
+                    {
+                        "Node ID": row[0],
+                        "Node Shortname": row[1],
+                        "Node Longname": row[2],
+                    }
+                )
     except Exception as e:
         await loading_message.edit(content=f"Database error: {e}")
         return
 
     if not nodes:
-        await loading_message.edit(content=f"No nodes found for {user.display_name}.")
+        await loading_message.edit(
+            content=f"No nodes found for {user.display_name}."
+        )
         return
 
-    embed = discord.Embed(title=f"Nodes owned by {user.display_name}", color=discord.Color.green())
+    # ---------- PAGINATION LOGIC ----------
+    PAGE_SIZE = 25
+    embeds = []
 
-    for node in nodes:
-        embed.add_field(
-            name=node.get("Node Longname", "Unknown Node"),
-            value=f"**Shortname:** {node.get('Node Shortname', 'N/A')}\n**Node ID:** {node.get('Node ID', 'N/A')}",
-            inline=False,
+    for i in range(0, len(nodes), PAGE_SIZE):
+        chunk = nodes[i : i + PAGE_SIZE]
+
+        embed = discord.Embed(
+            title=f"Nodes owned by {user.display_name}",
+            color=discord.Color.green(),
         )
 
-    await loading_message.edit(content=None, embed=embed)
+        for node in chunk:
+            embed.add_field(
+                name=node.get("Node Longname", "Unknown Node"),
+                value=(
+                    f"**Shortname:** {node.get('Node Shortname', 'N/A')}\n"
+                    f"**Node ID:** {node.get('Node ID', 'N/A')}"
+                ),
+                inline=False,
+            )
+
+        embed.set_footer(
+            text=f"Page {len(embeds) + 1} / {(len(nodes) - 1) // PAGE_SIZE + 1}"
+        )
+        embeds.append(embed)
+
+    # Remove loading text before sending menu
+    await loading_message.delete()
+
+    if len(embeds) == 1:
+        await ctx.send(embed=embeds[0])
+    else:
+        await menu(ctx, embeds, DEFAULT_CONTROLS)
 
 
 def is_valid_maidenhead(self, locator: str) -> bool:
