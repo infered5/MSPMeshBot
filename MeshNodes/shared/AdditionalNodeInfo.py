@@ -124,4 +124,12 @@ additional_info_questions = [
         max_length=256,
         hide_if_mobile=False,
     ),
+    ContactQuestion(
+        json_name="contact",
+        human_name="Contact URL",
+        question="If you'd like, share the Contact URL from the mobile app.",
+        min_length=1,
+        max_length=256,
+        hide_if_mobile=False,
+    ),
 ]
