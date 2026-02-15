@@ -115,19 +115,19 @@ additional_info_questions = [
         max_value=2500,  # Highest point in MN is Eagle Mountain at 2301 feet above sea level
         hide_if_mobile=True,
     ),
+    ContactQuestion(
+        json_name="contact",
+        human_name="Contact URL",
+        question="If you'd like, share the Contact URL from the mobile app.",
+        min_length=1,
+        max_length=256,
+        hide_if_mobile=False,
+    ),
     # Etc Information
     StringQuestion(
         json_name="notes",
         human_name="Notes",
         question="Any additional notes about this node?",
-        min_length=1,
-        max_length=256,
-        hide_if_mobile=False,
-    ),
-    ContactQuestion(
-        json_name="contact",
-        human_name="Contact URL",
-        question="If you'd like, share the Contact URL from the mobile app.",
         min_length=1,
         max_length=256,
         hide_if_mobile=False,
