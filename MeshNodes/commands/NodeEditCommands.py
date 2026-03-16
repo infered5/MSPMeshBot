@@ -114,7 +114,7 @@ async def register_node(mesh_nodes, ctx, user: discord.User = None):
                     exists = cursor.fetchone()
                     if exists:
                         await interaction.response.send_message(
-                            f"❌ Node with ID `{node_id_val}` already exists in the database. Please use a different Node ID or use `!editnode` to update.",
+                            f"❌ Node with ID `{node_id_val}` already exists in the database. Please use a different Node ID or use `!editnodeinfo` to update.",
                             ephemeral=True,
                         )
                         return
