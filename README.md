@@ -1,5 +1,5 @@
 # MSPMeshBot
-A [Red-DiscordBot Cog](https://docs.discord.red/en/latest/index.html) for browsing Meshtastic Node data stored in Google Sheets, submitted in Google Forms
+A [Red-DiscordBot Cog](https://docs.discord.red/en/latest/index.html) for browsing Meshtastic Node data stored in a CSV file, browsable and submittable entirely inside Discord.
 
 ![image](https://github.com/user-attachments/assets/c8e2f147-6b3c-474c-a26a-cbdaf8567f36)
 
@@ -9,8 +9,6 @@ Drastically reduce the amount of "Who has this node?" questions in your chats an
 
 # Requirements
 
-* A Google Account
-* Google Cloud Access (For Sheets API. This can entirely be done on the Free tier.)
 * A Discord Account.
 * Access to the [Discord Developer Portal] (https://discord.com/developers/applications).
 * A server capable of running Python 3.11.x, or higher, or possibly slightly lower.
