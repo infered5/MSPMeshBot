@@ -18,21 +18,11 @@ Drastically reduce the amount of "Who has this node?" questions in your chats an
 
 # Installation
 
-## Google Installation
-
-1) With your Google Account, head over to the [Example Google Form](https://drive.google.com/drive/folders/14CoK4XRR_SexdnPJ2oq6Efpij5ewz1RB?usp=sharing) and Make A Copy to your own Google Drive.
-2) RENAME the Form to a unique form name.
-3) Go to Responses and create a new Google Sheet to link the responses to.
-4) RENAME the Responses Sheet to whatever works best.
-5) Head to Google Cloud, create a new project and enable the Sheets API.
-6) Create a Service User, create a new key, download the JSON file. Rename to `credentials.json` and keep handy.
-7) Write down the Sheets ID (https://docs.google.com/spreadsheets/d/[a bunch of stuff you want to copy]/edit?gid=a bunch of stuff nobody cares about#gid=more trash forget this stuff)
-8) Write down the Responses Sheet Name.
-
 ## Discord Installation
 
 1) Go to the Developer Portal and create a new Application, ensure it's a Bot, and write down the Secret.
-2) Add a funny picture, ensuring it doesn't violate the Meshtastic trademarks.
+2) It will require message writing, reading, editing, picture uploads, embed, and emoji attachments. Most Red installs will have this figured out.
+3) Add a funny picture, ensuring it doesn't violate the Meshtastic trademarks.
 
 ## Server Installation
 
