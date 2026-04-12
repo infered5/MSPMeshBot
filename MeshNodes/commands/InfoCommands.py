@@ -192,6 +192,8 @@ async def node_info(mesh_nodes, ctx, *identifier: str):
         return
 
     identifier = " ".join(identifier).strip()
+    if identifier.startswith("!"):
+        identifier = identifier[1:]
 
     loading_message = await ctx.send(mesh_nodes.get_random_loading_message())
 
